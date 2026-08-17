@@ -525,7 +525,7 @@ const sampleRows = [
 const state = {
   rows: (window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date)),
   leadDetails: window.embeddedLeadDetails || [],
-  mainLeadRecords: window.embeddedMainLeadRecords || window.embeddedLeadDetails || [],
+  mainLeadRecords: enrichMainLeadRecords(window.embeddedMainLeadRecords || window.embeddedLeadDetails || [], window.embeddedLeadDetails || []),
   transitions: [],
   cbcSchools: window.embeddedCbcSchools || [],
   agents: fallbackAgents,
@@ -1677,6 +1677,23 @@ function firstCell(record, names) {
 
 function schoolKey(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function leadMatchKey(lead) {
+  return [lead.student, lead.school, lead.agent].map(schoolKey).join("|");
+}
+
+function enrichMainLeadRecords(records, details) {
+  const detailByLead = new Map(details.map((detail) => [leadMatchKey(detail), detail]));
+  return records.map((record) => {
+    const detail = detailByLead.get(leadMatchKey(record));
+    return {
+      ...record,
+      lastDate: record.lastDate || detail?.lastDate || "",
+      firstDate: record.firstDate || detail?.firstDate || "",
+      frequency: Number(record.frequency || detail?.frequency || 0)
+    };
+  });
 }
 
 function parseCbcRows(csvText) {
