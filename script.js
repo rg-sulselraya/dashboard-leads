@@ -717,6 +717,12 @@ function statusTone(status) {
   return "";
 }
 
+function utilizeTone(percent) {
+  if (percent >= 70) return "high";
+  if (percent >= 40) return "medium";
+  return "low";
+}
+
 function rowsForDaily() {
   return state.rows.filter((row) => row.date === state.selectedDate);
 }
@@ -1031,6 +1037,7 @@ function renderAgentRecap(rows) {
       <th>Nama Ejen</th>
       <th>Leads</th>
       <th>Utilize</th>
+      <th>% Utilize</th>
       ${statusColumns.map((status) => `<th>${status}</th>`).join("")}
     </tr>
   `;
@@ -1040,7 +1047,8 @@ function renderAgentRecap(rows) {
       const leads = fuStatusColumns.reduce((sum, status) => sum + sumRows(agentRows, status), 0);
       const utilize = ["Paid", "Hold", "Prospek", "Connected"]
         .reduce((sum, status) => sum + sumRows(agentRows, status), 0);
-      return { ...agent, leads, utilize, rows: agentRows };
+      const utilizeRate = leads ? Math.round((utilize / leads) * 100) : 0;
+      return { ...agent, leads, utilize, utilizeRate, rows: agentRows };
     })
     .sort((a, b) => b.leads - a.leads || b.utilize - a.utilize || a.name.localeCompare(b.name));
 
@@ -1049,12 +1057,13 @@ function renderAgentRecap(rows) {
       <td>${agent.name}</td>
       <td class="total-cell">${agent.leads || "-"}</td>
       <td class="total-cell">${agent.utilize || "-"}</td>
+      <td><span class="utilize-badge ${utilizeTone(agent.utilizeRate)}" style="--utilize-red:${Math.max(0, (50 - agent.utilizeRate) / 50).toFixed(2)}; --utilize-green:${Math.max(0, (agent.utilizeRate - 50) / 50).toFixed(2)}">${agent.leads ? `${agent.utilizeRate}%` : "-"}</span></td>
       ${statusColumns.map((status) => {
         const value = sumRows(agent.rows, status);
         return `<td class="${value ? "" : "empty-cell"}">${value || "-"}</td>`;
       }).join("")}
     </tr>
-  `).join("") || `<tr><td colspan="${statusColumns.length + 3}" class="empty-table">Tidak ada data ejen pada filter ini.</td></tr>`;
+  `).join("") || `<tr><td colspan="${statusColumns.length + 4}" class="empty-table">Tidak ada data ejen pada filter ini.</td></tr>`;
 }
 
 function renderAgentDetailTable() {

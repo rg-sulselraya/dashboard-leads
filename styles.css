@@ -573,17 +573,42 @@ td:nth-child(n+4) {
 .agent-recap-shell thead th:nth-child(2),
 .agent-recap-shell tbody td:nth-child(2),
 .agent-recap-shell thead th:nth-child(3),
-.agent-recap-shell tbody td:nth-child(3) {
+.agent-recap-shell tbody td:nth-child(3),
+.agent-recap-shell thead th:nth-child(4),
+.agent-recap-shell tbody td:nth-child(4) {
   width: 7%;
   min-width: 68px;
   text-align: center;
 }
 
-.agent-recap-shell thead th:nth-child(n+4),
-.agent-recap-shell tbody td:nth-child(n+4) {
-  width: 7.5%;
-  min-width: 66px;
+.agent-recap-shell thead th:nth-child(n+5),
+.agent-recap-shell tbody td:nth-child(n+5) {
+  width: 7%;
+  min-width: 62px;
   text-align: center;
+}
+
+.utilize-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 3px 10px;
+  border: 1px solid
+    color-mix(in srgb, #d0d5dd, #ef4444 calc(var(--utilize-red, 0) * 55%));
+  border-radius: 999px;
+  color: color-mix(
+    in srgb,
+    color-mix(in srgb, #344054, #b42318 calc(var(--utilize-red, 0) * 75%)),
+    #067647 calc(var(--utilize-green, 0) * 75%)
+  );
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, #fff, #fee4e2 calc(var(--utilize-red, 0) * 72%)),
+    #dcfae6 calc(var(--utilize-green, 0) * 72%)
+  );
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .agent-detail-controls {
