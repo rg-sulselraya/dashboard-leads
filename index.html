@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monitoring Data Leads</title>
+    <link rel="stylesheet" href="styles.css?v=54" />
+  </head>
+  <body>
+    <main class="sheet-dashboard">
+      <header class="app-header">
+        <div class="title-lockup">
+          <img src="ruangguru-logo.svg" alt="Ruangguru" />
+          <h1>Monitoring Data Leads</h1>
+        </div>
+        <section class="sync-panel" aria-label="Sinkronisasi data">
+          <input id="sheetUrl" type="url" value="https://docs.google.com/spreadsheets/d/1m-UZxq6jTF5bOCEVlcoqy1pRYL02or5MqEPp-xzzi7k/edit?gid=0#gid=0" />
+          <button id="syncButton" type="button">Muat Data</button>
+          <span id="syncStatus">Memuat nama ejen dari Validasi kolom M...</span>
+        </section>
+        <section class="dashboard-controls" aria-label="Filter dashboard">
+          <div class="filter-stack">
+            <label class="regional-filter">
+              <select id="regionalFilter" aria-label="Filter regional">
+                <option value="all">Semua Regional</option>
+                <option value="Regional - Makassar Raya">Makassar Raya</option>
+                <option value="Regional - Sulawesi Selatan">Sulawesi Selatan</option>
+              </select>
+            </label>
+            <label class="branch-filter">
+              <select id="branchFilter" aria-label="Filter cabang">
+                <option value="all">Semua Cabang</option>
+              </select>
+            </label>
+          </div>
+          <nav class="period-menu" aria-label="Menu periode">
+            <button class="period-tab active" data-target="daily" type="button">Daily</button>
+            <button class="period-tab" data-target="weekly" type="button">Weekly</button>
+            <button class="period-tab" data-target="monthly" type="button">Monthly</button>
+            <button class="period-tab" data-target="agents" type="button">All Agen</button>
+          </nav>
+        </section>
+      </header>
+
+      <section class="period-filter-bar" aria-label="Filter periode aktif">
+        <div class="period-filter active" data-period-filter="daily">
+          <div class="period-label">Daily</div>
+          <input id="dailyPicker" type="date" aria-label="Pilih tanggal daily" />
+        </div>
+        <div class="period-filter" data-period-filter="weekly">
+          <div class="period-label">Weekly</div>
+          <select id="weeklyPicker" aria-label="Pilih minggu"></select>
+        </div>
+        <div class="period-filter" data-period-filter="monthly">
+          <div class="period-label">Monthly</div>
+          <select id="monthlyPicker" aria-label="Pilih bulan"></select>
+        </div>
+        <div class="period-filter" data-period-filter="agents">
+          <div class="period-label">All Agen</div>
+          <div class="period-note">Semua data agen sesuai filter regional dan cabang</div>
+        </div>
+      </section>
+
+      <section class="summary-strip" aria-label="Ringkasan">
+        <article>
+          <span>Total FU</span>
+          <strong id="totalFu">0</strong>
+        </article>
+        <article>
+          <span>Paid</span>
+          <strong id="totalPaid">0</strong>
+        </article>
+        <article>
+          <span>Hold</span>
+          <strong id="totalHold">0</strong>
+        </article>
+        <article>
+          <span>Prospect</span>
+          <strong id="totalProspect">0</strong>
+        </article>
+        <article>
+          <span>Connected</span>
+          <strong id="totalConnected">0</strong>
+        </article>
+        <article>
+          <span>No Respon</span>
+          <strong id="totalNoResponse">0</strong>
+        </article>
+        <article>
+          <span>Lost Deal</span>
+          <strong id="totalLostDeal">0</strong>
+        </article>
+        <article>
+          <span>Talk Time</span>
+          <strong id="totalTalkTime">0</strong>
+        </article>
+      </section>
+
+      <section class="insight-grid" aria-label="Insight monitoring">
+        <article class="insight-card funnel-card">
+          <div class="insight-heading">
+            <span>Ringkasan Status</span>
+            <strong>Perlu Dipantau</strong>
+          </div>
+          <div id="alertList" class="alert-list"></div>
+        </article>
+      </section>
+
+      <section class="period-board daily-board active" data-period="daily">
+        <div class="table-shell">
+          <table>
+            <thead id="dailyHead"></thead>
+            <tbody id="dailyBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="period-board weekly-board" data-period="weekly">
+        <div class="table-shell">
+          <table>
+            <thead id="weeklyHead"></thead>
+            <tbody id="weeklyBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="period-board monthly-board" data-period="monthly">
+        <div class="table-shell">
+          <table>
+            <thead id="monthlyHead"></thead>
+            <tbody id="monthlyBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="period-board agents-board" data-period="agents">
+        <div class="agent-detail-controls" aria-label="Filter detail agen">
+          <div class="agent-filter-title">
+            <strong>Filter Detail Leads</strong>
+            <span>Pilih agen atau status untuk melihat rincian lead</span>
+          </div>
+          <label>
+            <span>Nama Agen</span>
+            <select id="agentDetailFilter" aria-label="Filter nama agen">
+              <option value="all">Semua Agen</option>
+            </select>
+          </label>
+          <label>
+            <span>Status Terakhir FU</span>
+            <select id="agentStatusFilter" aria-label="Filter status terakhir FU">
+              <option value="all">Semua Status</option>
+            </select>
+          </label>
+        </div>
+        <div id="agentDetailPanel" class="agent-detail-panel" hidden>
+          <div class="agent-detail-heading">
+            <strong id="agentDetailTitle">Detail Leads Agen</strong>
+            <span id="agentDetailCount">0 leads</span>
+          </div>
+          <div class="table-shell agent-detail-shell">
+            <table>
+              <thead id="agentDetailHead"></thead>
+              <tbody id="agentDetailBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="agentRecapPanel" class="table-shell agent-recap-shell">
+          <table>
+            <thead id="agentRecapHead"></thead>
+            <tbody id="agentRecapBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="sheet-data.js?v=1"></script>
+    <script src="lead-detail.js?v=2"></script>
+    <script src="script.js?v=36"></script>
+  </body>
+</html>
