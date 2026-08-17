@@ -219,8 +219,8 @@ select {
 
 .period-tab.active {
   color: #fff;
-  background: linear-gradient(135deg, var(--rg-blue), var(--rg-teal));
-  box-shadow: 0 7px 16px rgba(0, 119, 255, 0.2);
+  background: linear-gradient(135deg, #ff8a00, #ffb020);
+  box-shadow: 0 7px 16px rgba(255, 138, 0, 0.22);
   font-weight: 850;
 }
 
