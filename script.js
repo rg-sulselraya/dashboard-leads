@@ -648,7 +648,9 @@ function uniqueSorted(values) {
 }
 
 function isIsoDate(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const year = Number(value.slice(0, 4));
+  return year >= 2020 && year <= 2030;
 }
 
 function isVacantName(name) {
