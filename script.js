@@ -525,6 +525,7 @@ const sampleRows = [
 const state = {
   rows: (window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date)),
   leadDetails: window.embeddedLeadDetails || [],
+  transitions: [],
   agents: fallbackAgents,
   activePeriod: "daily",
   selectedRegional: "all",
@@ -582,6 +583,8 @@ const el = {
   regionalFilter: document.querySelector("#regionalFilter"),
   branchFilter: document.querySelector("#branchFilter"),
   alertList: document.querySelector("#alertList"),
+  transitionTitle: document.querySelector("#transitionTitle"),
+  transitionList: document.querySelector("#transitionList"),
   topAgents: document.querySelector("#topAgents"),
   branchSummaryTitle: document.querySelector("#branchSummaryTitle"),
   branchSummary: document.querySelector("#branchSummary"),
@@ -744,6 +747,15 @@ function applyLeadDetailFilters(details) {
   });
 }
 
+function applyTransitionFilters(transitions) {
+  return transitions.filter((transition) => {
+    const rowRegional = transition.regional || branchRegionalMap[transition.branch] || "Tanpa Regional";
+    const matchesRegional = state.selectedRegional === "all" || rowRegional === state.selectedRegional;
+    const matchesBranch = state.selectedBranch === "all" || transition.branch === state.selectedBranch;
+    return matchesRegional && matchesBranch;
+  });
+}
+
 function renderHead(target) {
   target.innerHTML = `
     <tr>
@@ -880,6 +892,20 @@ function currentRows() {
       : rowsForMonthly());
 }
 
+function currentTransitions() {
+  const filtered = applyTransitionFilters(state.transitions);
+  if (state.activePeriod === "daily") {
+    return filtered.filter((transition) => transition.date === state.selectedDate);
+  }
+  if (state.activePeriod === "weekly") {
+    return filtered.filter((transition) => getWeekKey(transition.date) === state.selectedWeek);
+  }
+  if (state.activePeriod === "monthly") {
+    return filtered.filter((transition) => getMonthKey(transition.date) === state.selectedMonth);
+  }
+  return filtered;
+}
+
 function groupTotal(rows, key) {
   return rows.reduce((totals, row) => {
     const name = row[key] || "Tanpa Data";
@@ -891,15 +917,11 @@ function groupTotal(rows, key) {
 function renderAlerts(rows) {
   const total = fuStatusColumns.reduce((sum, status) => sum + sumRows(rows, status), 0) || 1;
   const noResponse = sumRows(rows, "No Respon");
-  const connected = sumRows(rows, "Connected");
-  const paid = sumRows(rows, "Paid");
   const hold = sumRows(rows, "Hold");
   const prospect = sumRows(rows, "Prospek");
   const alerts = [
-    ["Paid", paid, Math.round((paid / total) * 100), "good"],
     ["Hold", hold, Math.round((hold / total) * 100), "warn"],
     ["Prospek", prospect, Math.round((prospect / total) * 100), "info"],
-    ["Connected", connected, Math.round((connected / total) * 100), "info"],
     ["No Respon", noResponse, Math.round((noResponse / total) * 100), "high"]
   ];
   el.alertList.innerHTML = alerts.map(([label, value, percent, tone]) => {
@@ -911,6 +933,31 @@ function renderAlerts(rows) {
       </div>
     `;
   }).join("");
+}
+
+function renderTransitions() {
+  const transitions = currentTransitions();
+  const totals = transitions.reduce((summary, transition) => {
+    const key = `${transition.from} -> ${transition.to}`;
+    summary[key] = (summary[key] || 0) + 1;
+    return summary;
+  }, {});
+  const items = Object.entries(totals)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
+    .slice(0, 8);
+  const total = transitions.length;
+  el.transitionTitle.textContent = `${total} perubahan`;
+  el.transitionList.innerHTML = items.map((item) => {
+    const width = total ? Math.round((item.value / total) * 100) : 0;
+    return `
+      <div class="transition-row">
+        <strong>${item.label}</strong>
+        <div class="mini-bar"><i style="width:${width}%"></i></div>
+        <b>${item.value}</b>
+      </div>
+    `;
+  }).join("") || `<div class="empty-insight">Belum ada perubahan status pada periode ini.</div>`;
 }
 
 function renderTopAgents(rows) {
@@ -1049,6 +1096,7 @@ function renderAgentDetailTable() {
 function renderInsights() {
   const rows = currentRows();
   renderAlerts(rows);
+  renderTransitions();
   renderTopAgents(rows);
   renderBranchSummary(rows);
   renderAgentRecap(rows);
@@ -1207,6 +1255,37 @@ function parseSheetRows(csvText) {
   }).filter((row) => row.agent && row.status && Number.isFinite(row.count));
 }
 
+function parseSheetTransitions(csvText) {
+  const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
+  const headers = parsed.shift()?.map(normalizeHeader) || [];
+  if (!headers.includes("hasil_fu_1") && !headers.includes("tanggal_fu_1")) return [];
+
+  return parsed.flatMap((row) => {
+    const branch = row[3] || "Tanpa Cabang";
+    const agent = row[12] || "";
+    if (!agent || isVacantName(agent)) return [];
+
+    const attempts = [0, 1, 2, 3, 4, 5]
+      .map((index) => {
+        const base = 18 + index * 5;
+        return {
+          date: normalizeSheetDate(row[base] || ""),
+          status: normalizeStatus(row[base + 3] || "")
+        };
+      })
+      .filter((attempt) => isIsoDate(attempt.date) && attempt.status)
+      .sort((a, b) => parseDate(a.date) - parseDate(b.date));
+
+    return attempts.map((attempt, index) => ({
+      date: attempt.date,
+      agent,
+      branch,
+      from: index === 0 ? "Belum di FU" : attempts[index - 1].status,
+      to: attempt.status
+    }));
+  });
+}
+
 function exportUrlFromSheetUrl(url) {
   const id = url.match(/\/d\/([^/]+)/)?.[1];
   const gid = url.match(/[?&#]gid=(\d+)/)?.[1] || "0";
@@ -1264,7 +1343,9 @@ async function loadSheet() {
     const agentResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "Validasi", "A:M"));
 
     if (!dataResponse.ok) throw new Error("Sheet data belum publik atau akses CSV ditolak.");
-    const rows = parseSheetRows(await dataResponse.text());
+    const csvText = await dataResponse.text();
+    const rows = parseSheetRows(csvText);
+    const transitions = parseSheetTransitions(csvText);
 
     if (agentResponse.ok) {
       const validationAgents = parseAgentValidation(await agentResponse.text());
@@ -1273,6 +1354,7 @@ async function loadSheet() {
 
     if (rows.length) {
       state.rows = rows;
+      state.transitions = transitions;
       state.selectedDate = uniqueSorted(rows.map((row) => row.date)).at(-1);
       state.selectedWeek = getWeekKey(state.selectedDate);
       state.selectedMonth = getMonthKey(state.selectedDate);
