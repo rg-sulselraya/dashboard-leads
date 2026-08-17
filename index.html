@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Monitoring Data Leads</title>
-    <link rel="stylesheet" href="styles.css?v=68" />
+    <link rel="stylesheet" href="styles.css?v=89" />
   </head>
   <body>
     <main class="sheet-dashboard">
@@ -38,6 +38,8 @@
             <button class="period-tab" data-target="weekly" type="button">Weekly</button>
             <button class="period-tab" data-target="monthly" type="button">Monthly</button>
             <button class="period-tab" data-target="agents" type="button">All Agen</button>
+            <button class="period-tab" data-target="cbc" type="button">Leads CBC</button>
+            <button class="period-tab" data-target="nr" type="button">Analisis NR</button>
           </nav>
         </section>
       </header>
@@ -58,6 +60,14 @@
         <div class="period-filter" data-period-filter="agents">
           <div class="period-label">All Agen</div>
           <div class="period-note">Semua data agen sesuai filter regional dan cabang</div>
+        </div>
+        <div class="period-filter" data-period-filter="cbc">
+          <div class="period-label">Leads CBC</div>
+          <div class="period-note">Detail leads CBC sesuai filter regional dan cabang</div>
+        </div>
+        <div class="period-filter" data-period-filter="nr">
+          <div class="period-label">Analisis NR</div>
+          <div class="period-note">Prioritas No Respon berdasarkan sekolah, agen, dan lead</div>
         </div>
       </section>
 
@@ -178,10 +188,25 @@
           </table>
         </div>
       </section>
+
+      <section class="period-board cbc-board" data-period="cbc">
+        <div class="table-shell cbc-leads-shell">
+          <table>
+            <thead id="cbcLeadHead"></thead>
+            <tbody id="cbcLeadBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="period-board nr-board" data-period="nr">
+        <div id="nrAnalysisPanel" class="nr-analysis-panel"></div>
+      </section>
     </main>
 
     <script src="sheet-data.js?v=2"></script>
+    <script src="cbc-data.js?v=1"></script>
+    <script src="main-leads.js?v=3"></script>
     <script src="lead-detail.js?v=2"></script>
-    <script src="script.js?v=42"></script>
+    <script src="script.js?v=75"></script>
   </body>
 </html>

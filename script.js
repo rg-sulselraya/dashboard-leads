@@ -525,7 +525,9 @@ const sampleRows = [
 const state = {
   rows: (window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date)),
   leadDetails: window.embeddedLeadDetails || [],
+  mainLeadRecords: window.embeddedMainLeadRecords || window.embeddedLeadDetails || [],
   transitions: [],
+  cbcSchools: window.embeddedCbcSchools || [],
   agents: fallbackAgents,
   activePeriod: "daily",
   selectedRegional: "all",
@@ -534,7 +536,9 @@ const state = {
   selectedWeek: "2026-W32",
   selectedMonth: "2026-08",
   selectedAgentDetail: "all",
-  selectedLastStatus: "all"
+  selectedLastStatus: "all",
+  selectedCbcSchool: "",
+  selectedCbcWeek: ""
 };
 
 const defaultSheetUrl = "https://docs.google.com/spreadsheets/d/1m-UZxq6jTF5bOCEVlcoqy1pRYL02or5MqEPp-xzzi7k/edit?gid=0#gid=0";
@@ -566,9 +570,12 @@ const el = {
   dailyHead: document.querySelector("#dailyHead"),
   weeklyHead: document.querySelector("#weeklyHead"),
   monthlyHead: document.querySelector("#monthlyHead"),
+  cbcLeadHead: document.querySelector("#cbcLeadHead"),
+  nrAnalysisPanel: document.querySelector("#nrAnalysisPanel"),
   dailyBody: document.querySelector("#dailyBody"),
   weeklyBody: document.querySelector("#weeklyBody"),
   monthlyBody: document.querySelector("#monthlyBody"),
+  cbcLeadBody: document.querySelector("#cbcLeadBody"),
   totalFu: document.querySelector("#totalFu"),
   totalPaid: document.querySelector("#totalPaid"),
   totalHold: document.querySelector("#totalHold"),
@@ -693,6 +700,12 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function formatSchoolTitle(value) {
+  return String(value || "-")
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (letter) => letter.toUpperCase());
 }
 
 function formatShortDate(value) {
@@ -1104,6 +1117,479 @@ function renderAgentDetailTable() {
   `).join("") || `<tr><td colspan="8" class="empty-table">Tidak ada detail lead pada filter ini.</td></tr>`;
 }
 
+function renderCbcLeads() {
+  el.cbcLeadHead.innerHTML = `
+    <tr>
+      <th>School Name</th>
+      <th>School Category</th>
+      <th>#Rombel</th>
+      <th>Rombel Deal</th>
+      <th>% Deal</th>
+      <th>#Leads</th>
+      <th>#Utilize</th>
+      <th>Progres</th>
+      <th>#Paid</th>
+    </tr>
+  `;
+  const schoolRows = buildCbcRows();
+  el.cbcLeadBody.innerHTML = schoolRows.map((row) => `
+    <tr class="${schoolKey(row.schoolName) === state.selectedCbcSchool ? "selected-row" : ""}">
+      <td><button class="school-toggle" type="button" data-school="${escapeHtml(schoolKey(row.schoolName))}">${escapeHtml(row.schoolName || "-")}</button></td>
+      <td>${escapeHtml(row.schoolCategory || "-")}</td>
+      <td>-</td>
+      <td>${row.rombelDeal || "-"}</td>
+      <td>${row.dealPercent || "-"}</td>
+      <td>${row.leads || "-"}</td>
+      <td>${row.utilize || "-"}</td>
+      <td>${renderProgressBar(row.progressValue)}</td>
+      <td>${row.paid || "-"}</td>
+    </tr>
+    ${schoolKey(row.schoolName) === state.selectedCbcSchool ? renderCbcSchoolDetail(row) : ""}
+  `).join("") || `<tr><td colspan="9" class="empty-table">Data Leads CBC belum diisi.</td></tr>`;
+}
+
+function renderNrAnalysis() {
+  const rows = buildNrAnalysisRows();
+  const totals = rows.reduce((summary, row) => {
+    summary.leads += row.leads;
+    summary.noResponse += row.noResponse;
+    summary.connected += row.connected;
+    summary.highRisk += row.noResponseRate >= 60 ? 1 : 0;
+    return summary;
+  }, { leads: 0, noResponse: 0, connected: 0, highRisk: 0 });
+  const nrRate = totals.leads ? Math.round((totals.noResponse / totals.leads) * 100) : 0;
+  const connectedRate = totals.leads ? Math.round((totals.connected / totals.leads) * 100) : 0;
+  const topSchools = rows.slice(0, 12);
+  const topAgents = buildNrAgentRows(rows).slice(0, 12);
+  const priorityLeads = buildNrPriorityLeads().slice(0, 18);
+  el.nrAnalysisPanel.innerHTML = `
+    <div class="nr-overview">
+      <article>
+        <span>Total Leads</span>
+        <strong>${totals.leads}</strong>
+      </article>
+      <article>
+        <span>No Respon</span>
+        <strong>${totals.noResponse}</strong>
+      </article>
+      <article>
+        <span>%NR</span>
+        <strong><span class="nr-rate-badge" style="--nr-rate:${nrRate}">${nrRate}%</span></strong>
+      </article>
+      <article>
+        <span>Connected Rate</span>
+        <strong>${connectedRate}%</strong>
+      </article>
+      <article>
+        <span>Area Risiko</span>
+        <strong>${totals.highRisk}</strong>
+      </article>
+    </div>
+    <div class="nr-analysis-grid">
+      ${renderNrTable("Sekolah NR Tertinggi", ["Sekolah", "Week", "#Leads", "NR", "%NR", "Action"], topSchools.map((row) => [
+        formatSchoolTitle(row.school),
+        row.weekActivity,
+        row.leads,
+        row.noResponse,
+        `<span class="nr-rate-badge" style="--nr-rate:${row.noResponseRate}">${row.noResponseRate}%</span>`,
+        `<span class="nr-action-pill ${row.actionTone}">${escapeHtml(row.action)}</span>`
+      ]))}
+      ${renderNrTable("Agen NR Tertinggi", ["Agen", "Sekolah", "#Leads", "NR", "%NR", "Action"], topAgents.map((row) => [
+        row.agent,
+        formatSchoolTitle(row.school),
+        row.leads,
+        row.noResponse,
+        `<span class="nr-rate-badge" style="--nr-rate:${row.noResponseRate}">${row.noResponseRate}%</span>`,
+        `<span class="nr-action-pill ${row.actionTone}">${escapeHtml(row.action)}</span>`
+      ]))}
+    </div>
+    ${renderNrTable("Prioritas Lead No Respon", ["Siswa", "Sekolah", "Week", "Agen", "Attempt", "Last FU"], priorityLeads.map((lead) => [
+      lead.student,
+      formatSchoolTitle(lead.school),
+      lead.weekActivity,
+      lead.agent || "Tanpa Agen",
+      lead.frequency || 1,
+      formatShortDate(lead.lastDate)
+    ]), "nr-priority-table")}
+  `;
+}
+
+function renderNrTable(title, headers, rows, className = "") {
+  return `
+    <section class="nr-card ${className}">
+      <div class="nr-card-title">${escapeHtml(title)}</div>
+      <div class="table-shell nr-table-shell">
+        <table>
+          <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${headers.length}" class="empty-table">Belum ada data.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function filteredMainLeadRecords() {
+  return state.mainLeadRecords
+    .filter((lead) => {
+      const regional = branchRegionalMap[lead.branch] || "Tanpa Regional";
+      return state.selectedRegional === "all" || regional === state.selectedRegional;
+    })
+    .filter((lead) => state.selectedBranch === "all" || lead.branch === state.selectedBranch);
+}
+
+function buildNrAnalysisRows() {
+  const grouped = filteredMainLeadRecords().reduce((summary, lead) => {
+    const key = `${schoolKey(lead.school)}|${schoolKey(lead.weekActivity || "Tanpa Week")}`;
+    if (!summary[key]) {
+      summary[key] = { school: lead.school, weekActivity: lead.weekActivity || "Tanpa Week", students: new Set(), noResponseStudents: new Set(), connectedStudents: new Set() };
+    }
+    const student = schoolKey(lead.student);
+    summary[key].students.add(student);
+    if (lead.lastStatus === "No Respon") summary[key].noResponseStudents.add(student);
+    if (lead.lastStatus === "Connected") summary[key].connectedStudents.add(student);
+    return summary;
+  }, {});
+  return Object.values(grouped).map((row) => {
+    const leads = row.students.size;
+    const noResponse = row.noResponseStudents.size;
+    const connected = row.connectedStudents.size;
+    const enriched = {
+      school: row.school,
+      weekActivity: row.weekActivity,
+      leads,
+      noResponse,
+      connected,
+      noResponseRate: leads ? Math.round((noResponse / leads) * 100) : 0
+    };
+    return { ...enriched, ...noResponseAction(enriched) };
+  }).sort((a, b) => b.noResponseRate - a.noResponseRate || b.noResponse - a.noResponse || b.leads - a.leads);
+}
+
+function buildNrAgentRows() {
+  const grouped = filteredMainLeadRecords()
+    .reduce((summary, lead) => {
+      const key = `${lead.agent || "Tanpa Agen"}|${schoolKey(lead.school)}|${schoolKey(lead.weekActivity || "Tanpa Week")}`;
+      if (!summary[key]) {
+        summary[key] = { agent: lead.agent || "Tanpa Agen", school: lead.school, weekActivity: lead.weekActivity || "Tanpa Week", students: new Set(), noResponseStudents: new Set(), connectedStudents: new Set() };
+      }
+      const student = schoolKey(lead.student);
+      summary[key].students.add(student);
+      if (lead.lastStatus === "No Respon") summary[key].noResponseStudents.add(student);
+      if (lead.lastStatus === "Connected") summary[key].connectedStudents.add(student);
+      return summary;
+    }, {});
+  return Object.values(grouped).map((row) => {
+    const leads = row.students.size;
+    const noResponse = row.noResponseStudents.size;
+    const connected = row.connectedStudents.size;
+    const enriched = {
+      agent: row.agent,
+      school: row.school,
+      weekActivity: row.weekActivity,
+      leads,
+      noResponse,
+      connected,
+      noResponseRate: leads ? Math.round((noResponse / leads) * 100) : 0
+    };
+    return { ...enriched, ...noResponseAction(enriched) };
+  }).sort((a, b) => b.noResponseRate - a.noResponseRate || b.noResponse - a.noResponse || b.leads - a.leads);
+}
+
+function buildNrPriorityLeads() {
+  return filteredMainLeadRecords()
+    .filter((lead) => lead.lastStatus === "No Respon")
+    .map((lead) => ({
+      ...lead,
+      frequency: Number(lead.frequency || 0)
+    }))
+    .sort((a, b) => {
+      const frequencyDiff = Number(b.frequency || 0) - Number(a.frequency || 0);
+      if (frequencyDiff) return frequencyDiff;
+      return (b.lastDate || "").localeCompare(a.lastDate || "");
+    });
+}
+
+function renderCbcSchoolDetail(row) {
+  const details = buildCbcSchoolWeeklyDetails(row.schoolName);
+  return `
+    <tr class="school-detail-row">
+      <td colspan="9">
+        <div class="school-detail-panel">
+          <div class="school-detail-layout">
+            <table class="school-detail-table">
+              <thead>
+                <tr>
+                  <th>Week Activity</th>
+                  <th>#Leads</th>
+                  <th>#Agen</th>
+                  <th>Leads/Agen</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${details.map((detail) => `
+                  <tr class="${detail.key === state.selectedCbcWeek ? "selected-week-row" : ""}">
+                    <td><button class="week-toggle" type="button" data-week="${escapeHtml(detail.key)}">${escapeHtml(detail.weekActivity)}</button></td>
+                    <td>${detail.leads}</td>
+                    <td>${detail.agents}</td>
+                    <td>${detail.leadsPerAgent}</td>
+                  </tr>
+                `).join("") || `<tr><td colspan="4" class="empty-table">Belum ada aktivitas FU untuk sekolah ini.</td></tr>`}
+              </tbody>
+            </table>
+            ${state.selectedCbcWeek ? renderCbcWeekAgentDetail(row.schoolName, state.selectedCbcWeek) : ""}
+          </div>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderProgressBar(value) {
+  if (!Number.isFinite(value)) return "-";
+  return `
+    <div class="progress-meter" aria-label="Progres ${value}%">
+      <i style="width:${Math.min(100, Math.max(0, value))}%; --progress-hue:${Math.round(value * 1.2)}"></i>
+      <span>${value}%</span>
+    </div>
+  `;
+}
+
+function buildCbcRows() {
+  const rowsBySchool = state.mainLeadRecords.reduce((summary, lead) => {
+    const key = schoolKey(lead.school);
+    if (!key) return summary;
+    const student = schoolKey(lead.student);
+    if (!student) return summary;
+    if (!summary[key]) summary[key] = { leads: new Set(), utilize: new Set(), paid: new Set() };
+    summary[key].leads.add(student);
+    if (lead.hasFu) summary[key].utilize.add(student);
+    if (lead.lastStatus === "Paid") summary[key].paid.add(student);
+    return summary;
+  }, {});
+
+  return state.cbcSchools.map((school) => {
+    const totals = rowsBySchool[schoolKey(school.schoolName)] || { leads: new Set(), utilize: new Set(), paid: new Set() };
+    const dealPercent = "-";
+    const leads = totals.leads.size;
+    const utilize = totals.utilize.size;
+    const paid = totals.paid.size;
+    return {
+      ...school,
+      rombelDeal: "",
+      dealPercent,
+      leads,
+      utilize,
+      progress: leads ? `${Math.round((utilize / leads) * 100)}%` : "-",
+      progressValue: leads ? Math.round((utilize / leads) * 100) : null,
+      paid
+    };
+  })
+    .filter((school) => state.selectedBranch === "all" || school.branch === state.selectedBranch)
+    .filter((school) => {
+      const regional = branchRegionalMap[school.branch] || "Tanpa Regional";
+      return state.selectedRegional === "all" || regional === state.selectedRegional;
+    })
+    .sort((a, b) => Number(b.leads || 0) - Number(a.leads || 0) || a.schoolName.localeCompare(b.schoolName));
+}
+
+function buildCbcSchoolWeeklyDetails(schoolName) {
+  const records = state.mainLeadRecords.filter((lead) => schoolKey(lead.school) === schoolKey(schoolName));
+  const weekly = records.reduce((summary, lead) => {
+    const key = lead.weekActivity || "Tanpa Week";
+    if (!summary[key]) summary[key] = { students: new Set(), agents: new Set() };
+    summary[key].students.add(schoolKey(lead.student));
+    if (lead.agent) summary[key].agents.add(lead.agent);
+    return summary;
+  }, {});
+  return Object.entries(weekly)
+    .map(([weekActivity, value]) => {
+      const leads = value.students.size;
+      const agents = value.agents.size;
+      return {
+        key: schoolKey(weekActivity),
+        weekActivity,
+        leads,
+        agents,
+        leadsPerAgent: agents ? (leads / agents).toFixed(1) : "-"
+      };
+    })
+    .sort((a, b) => weekActivityOrder(a.weekActivity) - weekActivityOrder(b.weekActivity) || a.weekActivity.localeCompare(b.weekActivity));
+}
+
+function renderCbcWeekAgentDetail(schoolName, weekKey) {
+  const rows = buildCbcWeekAgentRows(schoolName, weekKey);
+  const weekLabel = buildCbcSchoolWeeklyDetails(schoolName).find((detail) => detail.key === weekKey)?.weekActivity || "Week terpilih";
+  return `
+    <div class="week-agent-panel">
+      <div class="week-agent-title">
+        <span>${escapeHtml(formatSchoolTitle(schoolName))} - ${escapeHtml(weekLabel)}</span>
+        <strong>${rows.length} agen</strong>
+      </div>
+      ${renderNoResponseInsight(rows)}
+      <table class="week-agent-table">
+        <thead>
+          <tr>
+            <th>Nama Agen</th>
+            <th>#Leads</th>
+            <th>%FU</th>
+            <th>P</th>
+            <th>H</th>
+            <th>Pr</th>
+            <th>C</th>
+            <th>Nr</th>
+            <th>%Nr</th>
+            <th>L</th>
+            <th>Talk</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.agent || "-")}</td>
+              <td>${row.leads}</td>
+              <td><span class="fu-progress-badge" style="--fu-progress:${row.fuProgress}">${row.fuProgress}%</span></td>
+              <td>${row.paid || "-"}</td>
+              <td>${row.hold || "-"}</td>
+              <td>${row.prospect || "-"}</td>
+              <td>${row.connected || "-"}</td>
+              <td>${row.noResponse || "-"}</td>
+              <td><span class="nr-rate-badge" style="--nr-rate:${row.noResponseRate}">${row.noResponseRate}%</span></td>
+              <td>${row.lostDeal || "-"}</td>
+              <td>${row.talk || "-"}</td>
+              <td><span class="nr-action-pill ${row.actionTone}">${escapeHtml(row.action)}</span></td>
+            </tr>
+          `).join("") || `<tr><td colspan="12" class="empty-table">Belum ada data agen pada week ini.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderNoResponseInsight(rows) {
+  const totals = rows.reduce((summary, row) => {
+    summary.leads += row.leads || 0;
+    summary.noResponse += row.noResponse || 0;
+    summary.connected += row.connected || 0;
+    summary.highRisk += row.noResponseRate >= 60 ? 1 : 0;
+    return summary;
+  }, { leads: 0, noResponse: 0, connected: 0, highRisk: 0 });
+  const nrRate = totals.leads ? Math.round((totals.noResponse / totals.leads) * 100) : 0;
+  const connectedRate = totals.leads ? Math.round((totals.connected / totals.leads) * 100) : 0;
+  const action = nrRate >= 70
+    ? "Prioritas: validasi nomor dan ubah jam kontak"
+    : nrRate >= 45
+      ? "Prioritas: FU ulang dengan jam berbeda"
+      : "NR terkendali, jaga ritme follow-up";
+  const tone = nrRate >= 70 ? "high" : nrRate >= 45 ? "mid" : "low";
+  return `
+    <div class="nr-insight ${tone}">
+      <div>
+        <span>No Respon</span>
+        <strong>${totals.noResponse}/${totals.leads} (${nrRate}%)</strong>
+      </div>
+      <div>
+        <span>Connected</span>
+        <strong>${connectedRate}%</strong>
+      </div>
+      <div>
+        <span>Agen Risiko</span>
+        <strong>${totals.highRisk}</strong>
+      </div>
+      <p>${escapeHtml(action)}</p>
+    </div>
+  `;
+}
+
+function buildCbcWeekAgentRows(schoolName, weekKey) {
+  const records = state.mainLeadRecords
+    .filter((lead) => schoolKey(lead.school) === schoolKey(schoolName))
+    .filter((lead) => schoolKey(lead.weekActivity || "Tanpa Week") === weekKey);
+  const byAgent = records.reduce((summary, lead) => {
+    const agent = lead.agent || "Tanpa Agen";
+    if (!summary[agent]) {
+      summary[agent] = {
+        agent,
+        students: new Set(),
+        fuStudents: new Set(),
+        paidStudents: new Set(),
+        holdStudents: new Set(),
+        prospectStudents: new Set(),
+        connectedStudents: new Set(),
+        noResponseStudents: new Set(),
+        lostDealStudents: new Set(),
+        talk: 0
+      };
+    }
+    const student = schoolKey(lead.student);
+    summary[agent].students.add(student);
+    if (lead.hasFu) summary[agent].fuStudents.add(student);
+    if (lead.lastStatus === "Paid") summary[agent].paidStudents.add(student);
+    if (lead.lastStatus === "Hold") summary[agent].holdStudents.add(student);
+    if (lead.lastStatus === "Prospek") summary[agent].prospectStudents.add(student);
+    if (lead.lastStatus === "Connected") summary[agent].connectedStudents.add(student);
+    if (lead.lastStatus === "No Respon") summary[agent].noResponseStudents.add(student);
+    if (lead.lastStatus === "Lost Deal") summary[agent].lostDealStudents.add(student);
+    summary[agent].talk += Number(lead.talk || 0);
+    return summary;
+  }, {});
+  return Object.values(byAgent)
+    .map((row) => {
+      const leads = row.students.size;
+      return {
+        ...row,
+        leads,
+        paid: row.paidStudents.size,
+        hold: row.holdStudents.size,
+        prospect: row.prospectStudents.size,
+        connected: row.connectedStudents.size,
+        noResponse: row.noResponseStudents.size,
+        lostDeal: row.lostDealStudents.size,
+        noResponseRate: leads ? Math.round((row.noResponseStudents.size / leads) * 100) : 0,
+        fuProgress: leads ? Math.round((row.fuStudents.size / leads) * 100) : 0
+      };
+    })
+    .map((row) => ({ ...row, ...noResponseAction(row) }))
+    .sort((a, b) => b.leads - a.leads || a.agent.localeCompare(b.agent));
+}
+
+function noResponseAction(row) {
+  if (!row.leads) return { action: "-", actionTone: "neutral" };
+  if (row.noResponseRate >= 75 && row.connected <= Math.max(2, row.leads * 0.12)) {
+    return { action: "Validasi nomor", actionTone: "high" };
+  }
+  if (row.noResponseRate >= 60) {
+    return { action: "Cek jam kontak", actionTone: "high" };
+  }
+  if (row.noResponseRate >= 35) {
+    return { action: "FU ulang", actionTone: "mid" };
+  }
+  return { action: "Jaga ritme", actionTone: "low" };
+}
+
+function weekActivityOrder(value) {
+  const text = String(value || "").toLowerCase();
+  const months = {
+    januari: 1, jan: 1,
+    februari: 2, feb: 2,
+    maret: 3, mar: 3,
+    april: 4, apr: 4,
+    mei: 5,
+    juni: 6, jun: 6,
+    juli: 7, jul: 7,
+    agustus: 8, agu: 8, aug: 8,
+    september: 9, sep: 9,
+    oktober: 10, okt: 10,
+    november: 11, nov: 11,
+    desember: 12, des: 12
+  };
+  const week = Number(text.match(/w\s*(\d+)/)?.[1] || 99);
+  const monthKey = Object.keys(months).find((month) => text.includes(month));
+  return (months[monthKey] || 99) * 10 + week;
+}
+
 function renderInsights() {
   const rows = currentRows();
   renderAlerts(rows);
@@ -1115,6 +1601,7 @@ function renderInsights() {
 
 function renderActivePeriod() {
   document.body.classList.toggle("agents-mode", state.activePeriod === "agents");
+  document.body.classList.toggle("table-focus-mode", ["cbc", "nr"].includes(state.activePeriod));
   el.periodTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.target === state.activePeriod);
   });
@@ -1137,6 +1624,8 @@ function render() {
   renderBody(el.dailyBody, rowsForDaily());
   renderBody(el.weeklyBody, rowsForWeekly());
   renderBody(el.monthlyBody, rowsForMonthly());
+  renderCbcLeads();
+  renderNrAnalysis();
   renderSummary();
   renderInsights();
 }
@@ -1177,7 +1666,73 @@ function csvToRows(text) {
 }
 
 function normalizeHeader(value) {
-  return value.trim().toLowerCase().replace(/\s+/g, "_");
+  return value.trim().toLowerCase().replace(/[^a-z0-9%#]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function firstCell(record, names) {
+  const keys = names.map(normalizeHeader);
+  const found = keys.find((key) => record[key]);
+  return found ? record[found] : "";
+}
+
+function schoolKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function parseCbcRows(csvText) {
+  const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
+  const headers = parsed.shift()?.map(normalizeHeader) || [];
+  if (!headers.length) return [];
+  return parsed.map((row) => {
+    const record = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
+    return {
+      schoolName: firstCell(record, ["School Name", "Nama Sekolah", "Sekolah"]) || row[1] || "",
+      schoolCategory: firstCell(record, ["School Category", "Kategori Sekolah", "Category"]) || row[3] || "",
+      rombel: firstCell(record, ["#Rombel", "Rombel"]),
+      rombelDeal: firstCell(record, ["Rombel Deal"]),
+      dealPercent: firstCell(record, ["% Deal", "Deal %"]),
+      leads: firstCell(record, ["#Leads", "Leads"]),
+      utilize: firstCell(record, ["#Utilize", "Utilize"]),
+      progress: firstCell(record, ["Progres", "Progress"]),
+      paid: firstCell(record, ["#Paid", "Paid"])
+    };
+  }).filter((row) => Object.values(row).some(Boolean));
+}
+
+function parseMainLeadRecords(csvText) {
+  const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
+  const headers = parsed.shift()?.map(normalizeHeader) || [];
+  if (!headers.length) return [];
+  if (headers.includes("hasil_fu_1") || headers.includes("tanggal_fu_1")) {
+    return parsed.map((row) => {
+      const record = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
+      if (!String(row[0] || "").trim()) return null;
+      const attempts = [0, 1, 2, 3, 4, 5]
+        .map((index) => {
+          const base = 18 + index * 5;
+          return {
+            date: normalizeSheetDate(row[base] || ""),
+            status: normalizeStatus(row[base + 3] || "")
+          };
+        })
+        .filter((attempt) => isIsoDate(attempt.date) && attempt.status)
+        .sort((a, b) => parseDate(a.date) - parseDate(b.date));
+      return {
+        student: row[9] || firstCell(record, ["Nama Siswa", "Student", "Nama"]) || "",
+        school: row[5] || firstCell(record, ["Asal Sekolah", "School Name", "Nama Sekolah", "Sekolah", "School"]) || "",
+        weekActivity: row[2] || firstCell(record, ["Week Activity", "Week"]) || "Tanpa Week",
+        branch: row[3] || firstCell(record, ["Branch", "Cabang"]) || "Tanpa Cabang",
+        agent: row[12] || firstCell(record, ["Agent", "Ejen", "Nama Agen"]) || "",
+        lastStatus: attempts.at(-1)?.status || "",
+        lastDate: attempts.at(-1)?.date || "",
+        statuses: attempts,
+        talk: [22, 27, 32, 37, 42, 47].reduce((sum, column) => sum + (Number(row[column]) || 0), 0),
+        frequency: attempts.length,
+        hasFu: attempts.length > 0
+      };
+    }).filter((record) => record && record.school && record.student);
+  }
+  return [];
 }
 
 function normalizeStatus(value) {
@@ -1352,27 +1907,34 @@ async function loadSheet() {
   try {
     const dataResponse = await fetch(exportUrlFromSheetUrl(el.sheetUrl.value));
     const agentResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "Validasi", "A:M"));
+    const cbcResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "CBC", "A:E"));
 
     if (!dataResponse.ok) throw new Error("Sheet data belum publik atau akses CSV ditolak.");
     const csvText = await dataResponse.text();
     const rows = parseSheetRows(csvText);
     const transitions = parseSheetTransitions(csvText);
+    const mainLeadRecords = parseMainLeadRecords(csvText);
 
     if (agentResponse.ok) {
       const validationAgents = parseAgentValidation(await agentResponse.text());
       if (validationAgents.length) state.agents = validationAgents;
     }
 
+    if (cbcResponse.ok) {
+      state.cbcSchools = parseCbcRows(await cbcResponse.text());
+    }
+
     if (rows.length) {
       state.rows = rows;
       state.transitions = transitions;
+      state.mainLeadRecords = mainLeadRecords.length ? mainLeadRecords : state.mainLeadRecords;
       state.selectedDate = uniqueSorted(rows.map((row) => row.date)).at(-1);
       state.selectedWeek = getWeekKey(state.selectedDate);
       state.selectedMonth = getMonthKey(state.selectedDate);
     }
 
     render();
-    el.syncStatus.textContent = `${rows.length} data FU dimuat. ${state.agents.length} nama ejen dari Validasi.`;
+    el.syncStatus.textContent = `${rows.length} data FU dimuat. ${state.agents.length} nama ejen dari Validasi. ${state.cbcSchools.length} sekolah CBC.`;
   } catch (error) {
     el.syncStatus.textContent = `${error.message} Data contoh tetap ditampilkan.`;
   }
@@ -1414,6 +1976,21 @@ el.agentDetailFilter.addEventListener("change", (event) => {
 el.agentStatusFilter.addEventListener("change", (event) => {
   state.selectedLastStatus = event.target.value;
   render();
+});
+
+el.cbcLeadBody.addEventListener("click", (event) => {
+  const button = event.target.closest(".school-toggle");
+  if (!button) return;
+  state.selectedCbcSchool = state.selectedCbcSchool === button.dataset.school ? "" : button.dataset.school;
+  state.selectedCbcWeek = "";
+  renderCbcLeads();
+});
+
+el.cbcLeadBody.addEventListener("click", (event) => {
+  const button = event.target.closest(".week-toggle");
+  if (!button) return;
+  state.selectedCbcWeek = state.selectedCbcWeek === button.dataset.week ? "" : button.dataset.week;
+  renderCbcLeads();
 });
 
 el.periodTabs.forEach((tab) => {
