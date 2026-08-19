@@ -532,16 +532,40 @@ const state = {
   activePeriod: "daily",
   selectedRegional: "all",
   selectedBranch: "all",
-  selectedDate: "2026-08-04",
+  selectedDate: latestDateFromRows((window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date))),
   selectedWeek: "2026-W32",
   selectedMonth: "2026-08",
   selectedAgentDetail: "all",
   selectedLastStatus: "all",
   selectedCbcSchool: "",
-  selectedCbcWeek: ""
+  selectedCbcWeek: "",
+  lockedBranch: ""
 };
 
 const defaultSheetUrl = "https://docs.google.com/spreadsheets/d/1m-UZxq6jTF5bOCEVlcoqy1pRYL02or5MqEPp-xzzi7k/edit?gid=0#gid=0";
+const autoSyncIntervalMs = 60_000;
+let autoSyncTimer = null;
+let isSyncing = false;
+const adminPassword = "regional01";
+const branchPasswords = {
+  bone27: "Bone - Ahmad Yani",
+  bulukumba54: "Bulukumba - Jend. Sudirman",
+  gowa68: "Gowa - Sungguminasa",
+  baruga41: "Makassar - Baruga",
+  cendrawasih95: "Makassar - Cendrawasih",
+  baher03: "Makassar - Hertasning",
+  perintis02: "Makassar - Perintis",
+  sudiang16: "Makassar - Sudiang",
+  palopo97: "Palopo - Andi Kambo",
+  pangkep80: "Pangkep - Sultan Hasanuddin",
+  parepare73: "Parepare - Mattirotasi",
+  pinrang21: "Pinrang - Jend. Sudirman",
+  sidrap46: "Sidrap - Jenderal Sudirman",
+  soppeng59: "Soppeng - Lalabata",
+  toraja84: "Tana Toraja - Makale",
+  torut62: "Toraja Utara - Poros Bolu",
+  wajo13: "Wajo - Jend. Sudirman"
+};
 const allowedRegionals = ["Regional - Makassar Raya", "Regional - Sulawesi Selatan"];
 const branchRegionalMap = {
   "Makassar - Cendrawasih": "Regional - Makassar Raya",
@@ -564,6 +588,10 @@ const branchRegionalMap = {
 };
 
 const el = {
+  loginScreen: document.querySelector("#loginScreen"),
+  loginForm: document.querySelector("#loginForm"),
+  branchPassword: document.querySelector("#branchPassword"),
+  loginError: document.querySelector("#loginError"),
   dailyPicker: document.querySelector("#dailyPicker"),
   weeklyPicker: document.querySelector("#weeklyPicker"),
   monthlyPicker: document.querySelector("#monthlyPicker"),
@@ -654,10 +682,14 @@ function uniqueSorted(values) {
   return [...new Set(values)].sort();
 }
 
+function latestDateFromRows(rows) {
+  return uniqueSorted(rows.map((row) => row.date).filter(isIsoDate)).at(-1) || isoDate(new Date());
+}
+
 function isIsoDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
   const year = Number(value.slice(0, 4));
-  return year >= 2020 && year <= 2030;
+  return year >= 2020 && year <= new Date().getFullYear();
 }
 
 function isVacantName(name) {
@@ -816,6 +848,14 @@ function renderBody(target, rows) {
 }
 
 function renderBranchOptions() {
+  if (state.lockedBranch) {
+    state.selectedBranch = state.lockedBranch;
+    el.branchFilter.innerHTML = `<option value="${state.lockedBranch}">${state.lockedBranch}</option>`;
+    el.branchFilter.value = state.lockedBranch;
+    el.branchFilter.disabled = true;
+    return;
+  }
+
   const branchDisabled = state.selectedRegional === "all";
   if (branchDisabled) state.selectedBranch = "all";
   const branches = uniqueSorted(state.agents
@@ -836,6 +876,7 @@ function renderBranchOptions() {
 
 function renderRegionalOptions() {
   const regionals = allowedRegionals;
+  if (state.lockedBranch) state.selectedRegional = branchRegionalMap[state.lockedBranch] || "all";
 
   if (state.selectedRegional !== "all" && !regionals.includes(state.selectedRegional)) {
     state.selectedRegional = "all";
@@ -846,20 +887,77 @@ function renderRegionalOptions() {
     .map((regional) => `<option value="${regional}">${regional.replace("Regional - ", "")}</option>`)
     .join("")}`;
   el.regionalFilter.value = state.selectedRegional;
+  el.regionalFilter.disabled = Boolean(state.lockedBranch);
+}
+
+function unlockBranch(branch) {
+  state.lockedBranch = branch;
+  state.selectedBranch = branch;
+  state.selectedRegional = branchRegionalMap[branch] || "all";
+  sessionStorage.setItem("dashboardAccessMode", "branch");
+  sessionStorage.setItem("dashboardBranchAccess", branch);
+  document.body.classList.remove("auth-locked");
+  el.loginError.textContent = "";
+  render();
+  loadSheet();
+  startAutoSync();
+}
+
+function unlockAdmin() {
+  state.lockedBranch = "";
+  state.selectedBranch = "all";
+  state.selectedRegional = "all";
+  sessionStorage.setItem("dashboardAccessMode", "admin");
+  sessionStorage.removeItem("dashboardBranchAccess");
+  document.body.classList.remove("auth-locked");
+  el.loginError.textContent = "";
+  render();
+  loadSheet();
+  startAutoSync();
+}
+
+function handleLogin(event) {
+  event.preventDefault();
+  const password = String(el.branchPassword.value || "").trim().toLowerCase();
+  if (password === adminPassword) {
+    unlockAdmin();
+    return;
+  }
+  const branch = branchPasswords[password];
+  if (!branch) {
+    el.loginError.textContent = "Password cabang tidak sesuai.";
+    el.branchPassword.select();
+    return;
+  }
+  unlockBranch(branch);
+}
+
+function applySavedLogin() {
+  if (sessionStorage.getItem("dashboardAccessMode") === "admin") {
+    unlockAdmin();
+    return true;
+  }
+  const branch = sessionStorage.getItem("dashboardBranchAccess");
+  if (branch && Object.values(branchPasswords).includes(branch)) {
+    unlockBranch(branch);
+    return true;
+  }
+  return false;
 }
 
 function renderPickers() {
   const dates = uniqueSorted(state.rows.map((row) => row.date).filter(isIsoDate));
   const weeks = uniqueSorted(state.rows.map((row) => getWeekKey(row.date)));
   const months = uniqueSorted(state.rows.map((row) => getMonthKey(row.date)));
+  const today = isoDate(new Date());
 
-  if (!dates.includes(state.selectedDate)) state.selectedDate = dates.at(-1) || isoDate(new Date());
+  if (!state.selectedDate) state.selectedDate = dates.at(-1) || today;
   if (!weeks.includes(state.selectedWeek)) state.selectedWeek = weeks.at(-1) || getWeekKey(state.selectedDate);
   if (!months.includes(state.selectedMonth)) state.selectedMonth = months.at(-1) || getMonthKey(state.selectedDate);
 
   el.dailyPicker.innerHTML = dates.map((date) => `<option value="${date}">${formatDay(date)}</option>`).join("");
   el.dailyPicker.min = dates[0] || "";
-  el.dailyPicker.max = dates.at(-1) || "";
+  el.dailyPicker.max = today;
   el.weeklyPicker.innerHTML = weeks.map((week) => `<option value="${week}">${getWeekLabel(week)}</option>`).join("");
   el.monthlyPicker.innerHTML = months.map((month) => `<option value="${month}">${monthName(month)}</option>`).join("");
 
@@ -1919,8 +2017,14 @@ async function loadValidationAgentsOnly() {
   }
 }
 
-async function loadSheet() {
-  el.syncStatus.textContent = "Memuat data dari Google Sheet...";
+async function loadSheet(options = {}) {
+  const { preserveSelection = false, silent = false } = options;
+  if (isSyncing) return;
+  isSyncing = true;
+  const previousDate = state.selectedDate;
+  const previousWeek = state.selectedWeek;
+  const previousMonth = state.selectedMonth;
+  if (!silent) el.syncStatus.textContent = "Memuat data dari Google Sheet...";
   try {
     const dataResponse = await fetch(exportUrlFromSheetUrl(el.sheetUrl.value));
     const agentResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "Validasi", "A:M"));
@@ -1945,16 +2049,32 @@ async function loadSheet() {
       state.rows = rows;
       state.transitions = transitions;
       state.mainLeadRecords = mainLeadRecords.length ? mainLeadRecords : state.mainLeadRecords;
-      state.selectedDate = uniqueSorted(rows.map((row) => row.date)).at(-1);
-      state.selectedWeek = getWeekKey(state.selectedDate);
-      state.selectedMonth = getMonthKey(state.selectedDate);
+      if (preserveSelection) {
+        state.selectedDate = previousDate;
+        state.selectedWeek = previousWeek;
+        state.selectedMonth = previousMonth;
+      } else {
+        state.selectedDate = uniqueSorted(rows.map((row) => row.date)).at(-1);
+        state.selectedWeek = getWeekKey(state.selectedDate);
+        state.selectedMonth = getMonthKey(state.selectedDate);
+      }
     }
 
     render();
-    el.syncStatus.textContent = `${rows.length} data FU dimuat. ${state.agents.length} nama ejen dari Validasi. ${state.cbcSchools.length} sekolah CBC.`;
+    const syncedAt = new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+    el.syncStatus.textContent = `${rows.length} data FU dimuat. Auto sync 1 menit. Terakhir update ${syncedAt}.`;
   } catch (error) {
-    el.syncStatus.textContent = `${error.message} Data contoh tetap ditampilkan.`;
+    if (!silent) el.syncStatus.textContent = `${error.message} Data contoh tetap ditampilkan.`;
+  } finally {
+    isSyncing = false;
   }
+}
+
+function startAutoSync() {
+  if (autoSyncTimer) return;
+  autoSyncTimer = setInterval(() => {
+    loadSheet({ preserveSelection: true, silent: true });
+  }, autoSyncIntervalMs);
 }
 
 el.dailyPicker.addEventListener("change", (event) => {
@@ -1972,15 +2092,18 @@ el.monthlyPicker.addEventListener("change", (event) => {
   render();
 });
 
-el.syncButton.addEventListener("click", loadSheet);
+el.syncButton.addEventListener("click", () => loadSheet());
+el.loginForm.addEventListener("submit", handleLogin);
 
 el.regionalFilter.addEventListener("change", (event) => {
+  if (state.lockedBranch) return;
   state.selectedRegional = event.target.value;
   state.selectedBranch = "all";
   render();
 });
 
 el.branchFilter.addEventListener("change", (event) => {
+  if (state.lockedBranch) return;
   state.selectedBranch = event.target.value;
   render();
 });
@@ -2017,5 +2140,5 @@ el.periodTabs.forEach((tab) => {
   });
 });
 
-render();
+if (!applySavedLogin()) render();
 loadValidationAgentsOnly();

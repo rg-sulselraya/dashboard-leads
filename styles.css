@@ -1923,6 +1923,84 @@ td:nth-child(n+4) {
   min-width: 0;
 }
 
+.auth-locked .app-header,
+.auth-locked .period-filter-bar,
+.auth-locked .summary-strip,
+.auth-locked .insight-grid,
+.auth-locked .period-board {
+  display: none;
+}
+
+.login-screen {
+  display: none;
+  min-height: calc(100vh - 44px);
+  place-items: center;
+  padding: 28px;
+}
+
+.auth-locked .login-screen {
+  display: grid;
+}
+
+.login-card {
+  display: grid;
+  gap: 14px;
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid #cfe1f3;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.login-card img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+
+.login-card h2 {
+  color: var(--rg-blue-dark);
+  font-size: 1.35rem;
+}
+
+.login-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.login-card span {
+  color: #526175;
+  font-size: 0.76rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.login-card input {
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 0 12px;
+  font: inherit;
+}
+
+.login-card button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--rg-blue), var(--rg-teal));
+  color: #fff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.login-card p {
+  min-height: 20px;
+  color: var(--rg-red);
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
 @media (max-width: 1280px) {
   .school-detail-layout {
     grid-template-columns: minmax(360px, 0.65fr) minmax(680px, 1.35fr) !important;

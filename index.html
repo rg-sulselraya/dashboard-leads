@@ -4,10 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Monitoring Data Leads</title>
-    <link rel="stylesheet" href="styles.css?v=89" />
+    <link rel="stylesheet" href="styles.css?v=90" />
   </head>
-  <body>
+  <body class="auth-locked">
     <main class="sheet-dashboard">
+      <section id="loginScreen" class="login-screen" aria-label="Login cabang">
+        <form id="loginForm" class="login-card">
+          <img src="ruangguru-logo.svg" alt="Ruangguru" />
+          <h2>Monitoring Data Leads</h2>
+          <label>
+            <span>Password Cabang</span>
+            <input id="branchPassword" type="password" autocomplete="current-password" placeholder="Masukkan password" />
+          </label>
+          <button type="submit">Masuk</button>
+          <p id="loginError" role="alert"></p>
+        </form>
+      </section>
       <header class="app-header">
         <div class="title-lockup">
           <img src="ruangguru-logo.svg" alt="Ruangguru" />
@@ -203,10 +215,10 @@
       </section>
     </main>
 
-    <script src="sheet-data.js?v=2"></script>
+    <script src="sheet-data.js?v=3"></script>
     <script src="cbc-data.js?v=1"></script>
-    <script src="main-leads.js?v=3"></script>
-    <script src="lead-detail.js?v=2"></script>
-    <script src="script.js?v=76"></script>
+    <script src="main-leads.js?v=4"></script>
+    <script src="lead-detail.js?v=3"></script>
+    <script src="script.js?v=84"></script>
   </body>
 </html>
