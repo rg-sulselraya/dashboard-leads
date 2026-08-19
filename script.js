@@ -858,10 +858,19 @@ function renderBranchOptions() {
 
   const branchDisabled = state.selectedRegional === "all";
   if (branchDisabled) state.selectedBranch = "all";
-  const branches = uniqueSorted(state.agents
-    .filter((agent) => !isVacantName(agent.name))
-    .filter((agent) => state.selectedRegional === "all" || regionalForAgent(agent) === state.selectedRegional)
-    .map((agent) => agent.branch || "Tanpa Cabang"));
+  const branchSources = [
+    ...Object.keys(branchRegionalMap),
+    ...state.agents.map((agent) => agent.branch),
+    ...state.rows.map((row) => row.branch),
+    ...state.mainLeadRecords.map((lead) => lead.branch),
+    ...state.cbcSchools.map((school) => school.branch)
+  ];
+  const branches = uniqueSorted(branchSources
+    .filter((branch) => branch && branch !== "#N/A" && branch !== "Tanpa Cabang")
+    .filter((branch) => {
+      const regional = branchRegionalMap[branch] || "Tanpa Regional";
+      return state.selectedRegional === "all" || regional === state.selectedRegional;
+    }));
 
   if (state.selectedBranch !== "all" && !branches.includes(state.selectedBranch)) {
     state.selectedBranch = "all";
