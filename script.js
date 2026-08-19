@@ -1071,20 +1071,64 @@ function renderTransitions() {
     return summary;
   }, {});
   const items = Object.entries(totals)
-    .map(([label, value]) => ({ label, value }))
+    .map(([label, value]) => {
+      const [from, to] = label.split(" -> ");
+      return { label, value, tone: transitionTone(from, to) };
+    })
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   const total = transitions.length;
+  const summary = transitions.reduce((counts, transition) => {
+    counts[transitionTone(transition.from, transition.to)] += 1;
+    return counts;
+  }, { naik: 0, turun: 0, tetap: 0, baru: 0 });
+  el.transitionTitle.parentElement.querySelector(".transition-summary")?.remove();
   el.transitionTitle.textContent = `${total} perubahan`;
   el.transitionList.innerHTML = items.map((item) => {
     const width = total ? Math.round((item.value / total) * 100) : 0;
     return `
-      <div class="transition-row">
-        <strong>${item.label}</strong>
+      <div class="transition-row ${item.tone}">
+        <strong>
+          <span class="transition-badge ${item.tone}">${toneLabel(item.tone)}</span>
+          ${item.label}
+        </strong>
         <div class="mini-bar"><i style="width:${width}%"></i></div>
         <b>${item.value}</b>
       </div>
     `;
   }).join("") || `<div class="empty-insight">Belum ada perubahan status pada periode ini.</div>`;
+  el.transitionTitle.insertAdjacentHTML("beforebegin", `
+    <div class="transition-summary">
+      <span class="transition-pill naik">Naik ${summary.naik}</span>
+      <span class="transition-pill turun">Turun ${summary.turun}</span>
+      <span class="transition-pill tetap">Tetap ${summary.tetap}</span>
+      <span class="transition-pill baru">Baru ${summary.baru}</span>
+    </div>
+  `);
+}
+
+function transitionTone(from, to) {
+  const rank = {
+    "Belum di FU": -2,
+    Invalid: -1,
+    "No Respon": 0,
+    Hold: 1,
+    Prospek: 2,
+    Connected: 3,
+    Paid: 4,
+    "Lost Deal": -1
+  };
+  if (from === "Belum di FU") return "baru";
+  if (from === to) return "tetap";
+  const fromRank = rank[from] ?? 0;
+  const toRank = rank[to] ?? 0;
+  return toRank > fromRank ? "naik" : "turun";
+}
+
+function toneLabel(tone) {
+  if (tone === "naik") return "Naik";
+  if (tone === "turun") return "Turun";
+  if (tone === "baru") return "Baru";
+  return "Tetap";
 }
 
 function renderTopAgents(rows) {
