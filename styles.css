@@ -1313,6 +1313,25 @@ td:nth-child(n+4) {
 .transition-list {
   display: grid;
   gap: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #b7d8e8 #eef6fb;
+}
+
+.transition-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.transition-list::-webkit-scrollbar-track {
+  background: #eef6fb;
+  border-radius: 999px;
+}
+
+.transition-list::-webkit-scrollbar-thumb {
+  background: #b7d8e8;
+  border-radius: 999px;
 }
 
 .transition-row {

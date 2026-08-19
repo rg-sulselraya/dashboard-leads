@@ -1063,8 +1063,7 @@ function renderTransitions() {
   }, {});
   const items = Object.entries(totals)
     .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
-    .slice(0, 8);
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   const total = transitions.length;
   el.transitionTitle.textContent = `${total} perubahan`;
   el.transitionList.innerHTML = items.map((item) => {
@@ -1877,6 +1876,11 @@ function normalizeSheetDate(value) {
     const [, day, month, year] = wordDate;
     const monthNumber = months[month.toLowerCase()];
     if (monthNumber) return `${year}-${monthNumber}-${String(Number(day)).padStart(2, "0")}`;
+  }
+  const slashDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashDate) {
+    const [, day, month, year] = slashDate;
+    return `${year}-${String(Number(month)).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
   }
   return text;
 }
