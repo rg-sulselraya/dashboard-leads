@@ -696,20 +696,41 @@ function isVacantName(name) {
   return !name || name.toLowerCase().includes("vacant");
 }
 
+function mergeAgentMaster(validationAgents = []) {
+  const byName = new Map();
+  [...fallbackAgents, ...validationAgents]
+    .filter((agent) => agent && !isVacantName(agent.name))
+    .forEach((agent) => {
+      const existing = byName.get(agent.name);
+      const validBranch = agent.branch && Object.prototype.hasOwnProperty.call(branchRegionalMap, agent.branch)
+        ? agent.branch
+        : existing?.branch;
+      byName.set(agent.name, {
+        ...(existing || {}),
+        ...agent,
+        branch: validBranch || "Tanpa Cabang",
+        position: agent.position || existing?.position || "Student Advisor",
+        regional: agent.regional || existing?.regional || branchRegionalMap[validBranch] || "Tanpa Regional"
+      });
+    });
+  return [...byName.values()];
+}
+
 function regionalForAgent(agent) {
   return agent.regional || branchRegionalMap[agent.branch] || "Tanpa Regional";
 }
 
 function getAgentMaster(rows = []) {
-  const branchByAgent = new Map(state.agents.map((agent) => [agent.name, agent.branch || "Tanpa Cabang"]));
-  const regionalByAgent = new Map(state.agents.map((agent) => [agent.name, regionalForAgent(agent)]));
+  const agentDirectory = mergeAgentMaster(state.agents);
+  const branchByAgent = new Map(agentDirectory.map((agent) => [agent.name, agent.branch || "Tanpa Cabang"]));
+  const regionalByAgent = new Map(agentDirectory.map((agent) => [agent.name, regionalForAgent(agent)]));
   const fromRows = rows.map((row) => ({
     name: row.agent,
     position: row.position || "Student Advisor",
     branch: branchByAgent.get(row.agent) || row.branch || "Tanpa Cabang",
     regional: regionalByAgent.get(row.agent) || row.regional || branchRegionalMap[row.branch] || "Tanpa Regional"
   }));
-  const byName = new Map([...state.agents, ...fromRows]
+  const byName = new Map([...agentDirectory, ...fromRows]
     .filter((agent) => !isVacantName(agent.name))
     .map((agent) => [agent.name, agent]));
 
@@ -2074,7 +2095,7 @@ async function loadValidationAgentsOnly() {
     if (!response.ok) throw new Error("Akses Validasi ditolak.");
     const validationAgents = parseAgentValidation(await response.text());
     if (!validationAgents.length) throw new Error("Validasi kosong atau belum terbaca.");
-    state.agents = validationAgents;
+    state.agents = mergeAgentMaster(validationAgents);
     render();
     el.syncStatus.textContent = `${validationAgents.length} nama ejen dimuat dari Validasi. Vacant disembunyikan.`;
   } catch (error) {
@@ -2103,7 +2124,7 @@ async function loadSheet(options = {}) {
 
     if (agentResponse.ok) {
       const validationAgents = parseAgentValidation(await agentResponse.text());
-      if (validationAgents.length) state.agents = validationAgents;
+      if (validationAgents.length) state.agents = mergeAgentMaster(validationAgents);
     }
 
     if (cbcResponse.ok) {
