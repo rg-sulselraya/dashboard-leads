@@ -1508,6 +1508,7 @@ function renderProgressBar(value) {
 
 function buildCbcRows() {
   const rowsBySchool = state.mainLeadRecords.reduce((summary, lead) => {
+    if (!String(lead.updatedAt || "").trim()) return summary;
     const key = schoolKey(lead.school);
     if (!key) return summary;
     const student = schoolKey(lead.student);
@@ -1521,10 +1522,11 @@ function buildCbcRows() {
 
   return state.cbcSchools.map((school) => {
     const totals = rowsBySchool[schoolKey(school.schoolName)] || { leads: new Set(), utilize: new Set(), paid: new Set() };
-    const dealPercent = "-";
     const leads = totals.leads.size;
     const utilize = totals.utilize.size;
     const paid = totals.paid.size;
+    if (!leads) return null;
+    const dealPercent = school.dealPercent || (paid ? `${Math.round((paid / leads) * 100)}%` : "-");
     return {
       ...school,
       rombelDeal: "",
@@ -1536,6 +1538,7 @@ function buildCbcRows() {
       paid
     };
   })
+    .filter(Boolean)
     .filter((school) => state.selectedBranch === "all" || school.branch === state.selectedBranch)
     .filter((school) => {
       const regional = branchRegionalMap[school.branch] || "Tanpa Regional";
@@ -1545,7 +1548,9 @@ function buildCbcRows() {
 }
 
 function buildCbcSchoolWeeklyDetails(schoolName) {
-  const records = state.mainLeadRecords.filter((lead) => schoolKey(lead.school) === schoolKey(schoolName));
+  const records = state.mainLeadRecords
+    .filter((lead) => String(lead.updatedAt || "").trim())
+    .filter((lead) => schoolKey(lead.school) === schoolKey(schoolName));
   const weekly = records.reduce((summary, lead) => {
     const key = lead.weekActivity || "Tanpa Week";
     if (!summary[key]) summary[key] = { students: new Set(), agents: new Set() };
@@ -1655,6 +1660,7 @@ function renderNoResponseInsight(rows) {
 
 function buildCbcWeekAgentRows(schoolName, weekKey) {
   const records = state.mainLeadRecords
+    .filter((lead) => String(lead.updatedAt || "").trim())
     .filter((lead) => schoolKey(lead.school) === schoolKey(schoolName))
     .filter((lead) => schoolKey(lead.weekActivity || "Tanpa Week") === weekKey);
   const byAgent = records.reduce((summary, lead) => {
@@ -1853,9 +1859,10 @@ function parseCbcRows(csvText) {
   return parsed.map((row) => {
     const record = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
     return {
+      branch: firstCell(record, ["Branch", "Cabang"]) || row[0] || "",
       schoolName: firstCell(record, ["School Name", "Nama Sekolah", "Sekolah"]) || row[1] || "",
       schoolCategory: firstCell(record, ["School Category", "Kategori Sekolah", "Category"]) || row[3] || "",
-      rombel: firstCell(record, ["#Rombel", "Rombel"]),
+      rombel: firstCell(record, ["#Rombel", "Rombel"]) || row[4] || "",
       rombelDeal: firstCell(record, ["Rombel Deal"]),
       dealPercent: firstCell(record, ["% Deal", "Deal %"]),
       leads: firstCell(record, ["#Leads", "Leads"]),
@@ -1885,6 +1892,7 @@ function parseMainLeadRecords(csvText) {
         .filter((attempt) => isIsoDate(attempt.date) && attempt.status)
         .sort((a, b) => parseDate(a.date) - parseDate(b.date));
       return {
+        updatedAt: row[0] || firstCell(record, ["Updated At"]) || "",
         student: row[9] || firstCell(record, ["Nama Siswa", "Student", "Nama"]) || "",
         school: row[5] || firstCell(record, ["Asal Sekolah", "School Name", "Nama Sekolah", "Sekolah", "School"]) || "",
         weekActivity: row[2] || firstCell(record, ["Week Activity", "Week"]) || "Tanpa Week",
@@ -2099,7 +2107,10 @@ async function loadSheet(options = {}) {
     }
 
     if (cbcResponse.ok) {
-      state.cbcSchools = parseCbcRows(await cbcResponse.text());
+      const liveCbcSchools = parseCbcRows(await cbcResponse.text());
+      if (liveCbcSchools.length) {
+        state.cbcSchools = liveCbcSchools;
+      }
     }
 
     if (rows.length) {
