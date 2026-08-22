@@ -328,13 +328,17 @@ select {
 
 .insight-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(0, 0.86fr) minmax(320px, 1.14fr);
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .agent-branch-recap {
-  min-width: 0;
+  margin-bottom: 12px;
+  border: 1px solid rgba(0, 119, 255, 0.14);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
 }
 
 .section-heading {
@@ -369,7 +373,7 @@ select {
 }
 
 .agent-branch-recap .table-shell {
-  max-height: 238px;
+  max-height: 360px;
   border: 0;
   border-radius: 0 0 13px 13px;
   box-shadow: none;
@@ -1213,13 +1217,6 @@ td:nth-child(n+4) {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .insight-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .agent-branch-recap {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (max-width: 780px) {
