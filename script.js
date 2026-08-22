@@ -661,6 +661,9 @@ const el = {
   topAgents: document.querySelector("#topAgents"),
   branchSummaryTitle: document.querySelector("#branchSummaryTitle"),
   branchSummary: document.querySelector("#branchSummary"),
+  agentBranchRecapHead: document.querySelector("#agentBranchRecapHead"),
+  agentBranchRecapBody: document.querySelector("#agentBranchRecapBody"),
+  agentBranchRecapPeriod: document.querySelector("#agentBranchRecapPeriod"),
   agentRecapHead: document.querySelector("#agentRecapHead"),
   agentRecapBody: document.querySelector("#agentRecapBody"),
   agentRecapPanel: document.querySelector("#agentRecapPanel"),
@@ -721,13 +724,20 @@ function uniqueSorted(values) {
 }
 
 function latestDateFromRows(rows) {
-  return uniqueSorted(rows.map((row) => row.date).filter(isIsoDate)).at(-1) || isoDate(new Date());
+  const today = isoDate(new Date());
+  return uniqueSorted(rows.map((row) => row.date).filter((value) => isIsoDate(value) && value <= today)).at(-1) || today;
 }
 
 function isIsoDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
-  const year = Number(value.slice(0, 4));
-  return year >= 2020 && year <= new Date().getFullYear();
+  const [year, month, day] = value.split("-").map(Number);
+  if (year < 2020 || year > new Date().getFullYear() || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
 }
 
 function isVacantName(name) {
@@ -1249,6 +1259,67 @@ function renderBranchSummary(rows) {
       <b><span>${branchBadge(item)}</span>${item.rate}%</b>
     </div>
   `).join("") || `<div class="empty-insight">Tidak ada data.</div>`;
+}
+
+function renderAgentBranchRecap() {
+  if (!el.agentBranchRecapHead || !el.agentBranchRecapBody) return;
+
+  const roster = getAgentMaster([...state.rows, ...state.mainLeadRecords]);
+  const activeRows = currentRows().filter((row) => row.status !== "Talk Time");
+  const branchNames = uniqueSorted(roster
+    .map((agent) => agent.branch)
+    .filter((branch) => branch && branch !== "#N/A" && branch !== "Tanpa Cabang"));
+  const rows = branchNames.map((branch) => {
+    const branchAgents = roster.filter((agent) => agent.branch === branch);
+    const branchAgentNames = new Set(branchAgents.map((agent) => agent.name));
+    const fuAgentNames = new Set(activeRows
+      .filter((row) => row.branch === branch && branchAgentNames.has(row.agent))
+      .filter((row) => fuStatusColumns.includes(row.status) && Number(row.count || 0) > 0)
+      .map((row) => row.agent));
+    return {
+      branch,
+      totalAgents: branchAgents.length,
+      fuAgents: fuAgentNames.size,
+      pendingAgents: Math.max(0, branchAgents.length - fuAgentNames.size)
+    };
+  }).filter((row) => state.selectedRegional === "all"
+    ? state.selectedBranch === "all" || row.branch === state.selectedBranch
+    : branchRegionalMap[row.branch] === state.selectedRegional
+      && (state.selectedBranch === "all" || row.branch === state.selectedBranch));
+
+  el.agentBranchRecapHead.innerHTML = `
+    <tr>
+      <th>Branch</th>
+      <th>#Agen</th>
+      <th>#Agen FU</th>
+      <th>#Agen Belum FU</th>
+    </tr>
+  `;
+  el.agentBranchRecapBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.branch)}</td>
+      <td>${row.totalAgents || "-"}</td>
+      <td class="${row.fuAgents ? "recap-positive" : "empty-cell"}">${row.fuAgents || "-"}</td>
+      <td class="${row.pendingAgents ? "recap-pending" : "empty-cell"}">${row.pendingAgents || "-"}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="4" class="empty-table">Tidak ada data agen pada filter ini.</td></tr>`;
+
+  const periodLabel = state.activePeriod === "daily"
+    ? `Daily - ${formatShortDate(state.selectedDate)}`
+    : state.activePeriod === "weekly"
+      ? `Weekly - ${getWeekLabel(state.selectedWeek)}`
+      : state.activePeriod === "monthly"
+        ? `Monthly - ${monthName(state.selectedMonth)}`
+        : state.activePeriod === "agents"
+          ? "All Agen"
+          : state.activePeriod === "cbc"
+            ? "Leads CBC"
+            : "Analisis NR";
+  if (el.agentBranchRecapPeriod) {
+    el.agentBranchRecapPeriod.textContent = state.selectedRegional === "all"
+      ? periodLabel
+      : `${periodLabel} - ${state.selectedRegional.replace("Regional - ", "")}`;
+  }
 }
 
 function renderAgentRecap(rows) {
@@ -1843,6 +1914,7 @@ function render() {
   renderNrAnalysis();
   renderSummary();
   renderInsights();
+  renderAgentBranchRecap();
 }
 
 function csvToRows(text) {
