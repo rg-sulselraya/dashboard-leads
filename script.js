@@ -1266,22 +1266,26 @@ function renderAgentBranchRecap() {
 
   const roster = getAgentMaster([...state.rows, ...state.mainLeadRecords]);
   const activeRows = currentRows().filter((row) => row.status !== "Talk Time");
-  const rosterNames = new Set(roster.map((agent) => agent.name));
-  const fuAgentNames = new Set(activeRows
-    .filter((row) => rosterNames.has(row.agent))
-    .filter((row) => fuStatusColumns.includes(row.status) && Number(row.count || 0) > 0)
-    .map((row) => row.agent));
-  const recapLabel = state.selectedBranch !== "all"
-    ? state.selectedBranch
-    : state.selectedRegional !== "all"
-      ? state.selectedRegional.replace("Regional - ", "")
-      : "Semua Branch";
-  const rows = [{
-    branch: recapLabel,
-    totalAgents: roster.length,
-    fuAgents: fuAgentNames.size,
-    pendingAgents: Math.max(0, roster.length - fuAgentNames.size)
-  }];
+  const branchNames = uniqueSorted(roster
+    .map((agent) => agent.branch)
+    .filter((branch) => branch && branch !== "#N/A" && branch !== "Tanpa Cabang"));
+  const rows = branchNames.map((branch) => {
+    const branchAgents = roster.filter((agent) => agent.branch === branch);
+    const branchAgentNames = new Set(branchAgents.map((agent) => agent.name));
+    const fuAgentNames = new Set(activeRows
+      .filter((row) => row.branch === branch && branchAgentNames.has(row.agent))
+      .filter((row) => fuStatusColumns.includes(row.status) && Number(row.count || 0) > 0)
+      .map((row) => row.agent));
+    return {
+      branch,
+      totalAgents: branchAgents.length,
+      fuAgents: fuAgentNames.size,
+      pendingAgents: Math.max(0, branchAgents.length - fuAgentNames.size)
+    };
+  }).filter((row) => state.selectedRegional === "all"
+    ? state.selectedBranch === "all" || row.branch === state.selectedBranch
+    : branchRegionalMap[row.branch] === state.selectedRegional
+      && (state.selectedBranch === "all" || row.branch === state.selectedBranch));
 
   el.agentBranchRecapHead.innerHTML = `
     <tr>
