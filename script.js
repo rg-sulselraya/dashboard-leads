@@ -1264,7 +1264,12 @@ function renderBranchSummary(rows) {
 function renderAgentBranchRecap() {
   if (!el.agentBranchRecapHead || !el.agentBranchRecapBody) return;
 
-  const roster = getAgentMaster([...state.rows, ...state.mainLeadRecords]);
+  const roster = mergeAgentMaster(state.agents)
+    .filter((agent) => !isVacantName(agent.name))
+    .filter((agent) => state.selectedRegional === "all"
+      || regionalForAgent(agent) === state.selectedRegional)
+    .filter((agent) => state.selectedBranch === "all"
+      || agent.branch === state.selectedBranch);
   const activeRows = currentRows().filter((row) => row.status !== "Talk Time");
   const branchNames = uniqueSorted(roster
     .map((agent) => agent.branch)
