@@ -523,16 +523,41 @@ const sampleRows = [
 ];
 
 const state = {
-  rows: (window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date)),
-  leadDetails: window.embeddedLeadDetails || [],
-  mainLeadRecords: enrichMainLeadRecords(window.embeddedMainLeadRecords || window.embeddedLeadDetails || [], window.embeddedLeadDetails || []),
-  transitions: [],
+  rows: [
+    ...(window.centralFuRows || []),
+    ...(window.sulselFuRows || [])
+  ].length
+    ? [...(window.centralFuRows || []), ...(window.sulselFuRows || [])].filter((row) => isIsoDate(row.date))
+    : [...(window.embeddedFuRows || sampleRows), ...(window.sulselFuRows || [])].filter((row) => isIsoDate(row.date)),
+  leadDetails: [
+    ...(window.centralLeadDetails || []),
+    ...(window.sulselLeadDetails || [])
+  ].length
+    ? [...(window.centralLeadDetails || []), ...(window.sulselLeadDetails || [])]
+    : [...(window.embeddedLeadDetails || []), ...(window.sulselLeadDetails || [])],
+  mainLeadRecords: enrichMainLeadRecords(
+    [
+      ...(window.centralMainLeadRecords || window.embeddedMainLeadRecords || window.embeddedLeadDetails || []),
+      ...(window.sulselMainLeadRecords || [])
+    ],
+    [
+      ...(window.centralLeadDetails || window.embeddedLeadDetails || []),
+      ...(window.sulselLeadDetails || [])
+    ]
+  ),
+  transitions: [
+    ...(window.centralTransitions || []),
+    ...(window.embeddedTransitions || [])
+  ],
   cbcSchools: window.embeddedCbcSchools || [],
   agents: fallbackAgents,
   activePeriod: "daily",
   selectedRegional: "all",
   selectedBranch: "all",
-  selectedDate: latestDateFromRows((window.embeddedFuRows || sampleRows).filter((row) => isIsoDate(row.date))),
+  selectedDate: latestDateFromRows([
+    ...(window.centralFuRows || window.embeddedFuRows || sampleRows),
+    ...(window.sulselFuRows || [])
+  ].filter((row) => isIsoDate(row.date))),
   selectedWeek: "2026-W32",
   selectedMonth: "2026-08",
   selectedAgentDetail: "all",
@@ -543,6 +568,19 @@ const state = {
 };
 
 const defaultSheetUrl = "https://docs.google.com/spreadsheets/d/1m-UZxq6jTF5bOCEVlcoqy1pRYL02or5MqEPp-xzzi7k/edit?gid=0#gid=0";
+const sulselBranchSources = [
+  { name: "Bone - Ahmad Yani", gid: "197168761" },
+  { name: "Bulukumba - Jend. Sudirman", gid: "44730269" },
+  { name: "Palopo - Andi Kambo", gid: "134935314" },
+  { name: "Pangkep - Sultan Hasanuddin", gid: "547170870" },
+  { name: "Parepare - Mattirotasi", gid: "634092400" },
+  { name: "Pinrang - Jend. Sudirman", gid: "2010932017" },
+  { name: "Sidrap - Jenderal Sudirman", gid: "1982935978" },
+  { name: "Soppeng - Lalabata", gid: "2080861767" },
+  { name: "Tana Toraja - Makale", gid: "2040436994" },
+  { name: "Toraja Utara - Poros Bolu", gid: "1992483139" },
+  { name: "Wajo - Jend. Sudirman", gid: "1946854586" }
+];
 const autoSyncIntervalMs = 60_000;
 let autoSyncTimer = null;
 let isSyncing = false;
@@ -1916,17 +1954,19 @@ function parseMainLeadRecords(csvText) {
         updatedAt: row[0] || firstCell(record, ["Updated At"]) || "",
         student: row[9] || firstCell(record, ["Nama Siswa", "Student", "Nama"]) || "",
         school: row[5] || firstCell(record, ["Asal Sekolah", "School Name", "Nama Sekolah", "Sekolah", "School"]) || "",
+        className: row[10] || firstCell(record, ["User Class", "Kelas", "Class"]) || "",
         weekActivity: row[2] || firstCell(record, ["Week Activity", "Week"]) || "Tanpa Week",
         branch: row[3] || firstCell(record, ["Branch", "Cabang"]) || "Tanpa Cabang",
         agent: row[12] || firstCell(record, ["Agent", "Ejen", "Nama Agen"]) || "",
         lastStatus: attempts.at(-1)?.status || "",
+        firstDate: attempts[0]?.date || "",
         lastDate: attempts.at(-1)?.date || "",
         statuses: attempts,
         talk: [22, 27, 32, 37, 42, 47].reduce((sum, column) => sum + (Number(row[column]) || 0), 0),
         frequency: attempts.length,
         hasFu: attempts.length > 0
       };
-    }).filter((record) => record && record.school && record.student);
+    }).filter((record) => record && record.student && record.agent);
   }
   return [];
 }
@@ -1939,6 +1979,13 @@ function normalizeStatus(value) {
 
 function normalizeSheetDate(value) {
   const text = value.trim();
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    const parsed = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
   const months = {
     jan: "01", januari: "01",
     feb: "02", februari: "02",
@@ -2060,11 +2107,34 @@ function exportUrlFromSheetUrl(url) {
   return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 }
 
+function exportUrlFromSheetGid(url, gid) {
+  const id = url.match(/\/d\/([^/]+)/)?.[1];
+  if (!id) throw new Error("URL Google Sheet tidak valid.");
+  return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+}
+
 function sheetCsvUrl(url, sheet, range) {
   const id = url.match(/\/d\/([^/]+)/)?.[1];
   if (!id) throw new Error("URL Google Sheet tidak valid.");
   return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}&range=${encodeURIComponent(range)}`;
 }
+
+async function fetchText(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  let response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+  return {
+    ok: response.ok,
+    text: response.ok ? await response.text() : ""
+  };
+}
+
+const canSyncOnline = ["http:", "https:"].includes(window.location.protocol);
 
 function parseAgentValidation(csvText) {
   const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
@@ -2090,6 +2160,10 @@ function parseAgentValidation(csvText) {
 }
 
 async function loadValidationAgentsOnly() {
+  if (!canSyncOnline) {
+    el.syncStatus.textContent = "Data lokal siap digunakan. Sinkronisasi online tersedia saat dashboard memakai server.";
+    return;
+  }
   try {
     const response = await fetch(sheetCsvUrl(el.sheetUrl.value || defaultSheetUrl, "Validasi", "A:M"));
     if (!response.ok) throw new Error("Akses Validasi ditolak.");
@@ -2105,6 +2179,12 @@ async function loadValidationAgentsOnly() {
 
 async function loadSheet(options = {}) {
   const { preserveSelection = false, silent = false } = options;
+  if (!canSyncOnline) {
+    if (!silent) {
+      el.syncStatus.textContent = "Data lokal siap digunakan. Buka melalui server untuk sinkronisasi online.";
+    }
+    return;
+  }
   if (isSyncing) return;
   isSyncing = true;
   const previousDate = state.selectedDate;
@@ -2112,15 +2192,25 @@ async function loadSheet(options = {}) {
   const previousMonth = state.selectedMonth;
   if (!silent) el.syncStatus.textContent = "Memuat data dari Google Sheet...";
   try {
-    const dataResponse = await fetch(exportUrlFromSheetUrl(el.sheetUrl.value));
-    const agentResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "Validasi", "A:M"));
-    const cbcResponse = await fetch(sheetCsvUrl(el.sheetUrl.value, "CBC", "A:E"));
+    const sheetUrl = el.sheetUrl.value || defaultSheetUrl;
+    const sourceRequests = [
+      fetchText(exportUrlFromSheetUrl(sheetUrl)).then((result) => ({ name: "FU", ...result })),
+      ...sulselBranchSources.map((source) => fetchText(exportUrlFromSheetGid(sheetUrl, source.gid))
+        .then((result) => ({ name: source.name, ...result }))
+        .catch(() => ({ name: source.name, ok: false, text: "" })))
+    ];
+    const [sourceResults, agentResponse, cbcResponse] = await Promise.all([
+      Promise.all(sourceRequests),
+      fetch(sheetCsvUrl(sheetUrl, "Validasi", "A:M")).catch(() => ({ ok: false })),
+      fetch(sheetCsvUrl(sheetUrl, "CBC", "A:E")).catch(() => ({ ok: false }))
+    ]);
 
-    if (!dataResponse.ok) throw new Error("Sheet data belum publik atau akses CSV ditolak.");
-    const csvText = await dataResponse.text();
-    const rows = parseSheetRows(csvText);
-    const transitions = parseSheetTransitions(csvText);
-    const mainLeadRecords = parseMainLeadRecords(csvText);
+    const mainSource = sourceResults[0];
+    if (!mainSource.ok) throw new Error("Sheet data belum publik atau akses CSV ditolak.");
+    const validSources = sourceResults.filter((source) => source.ok && source.text);
+    const rows = validSources.flatMap((source) => parseSheetRows(source.text));
+    const transitions = validSources.flatMap((source) => parseSheetTransitions(source.text));
+    const mainLeadRecords = validSources.flatMap((source) => parseMainLeadRecords(source.text));
 
     if (agentResponse.ok) {
       const validationAgents = parseAgentValidation(await agentResponse.text());
@@ -2137,7 +2227,22 @@ async function loadSheet(options = {}) {
     if (rows.length) {
       state.rows = rows;
       state.transitions = transitions;
-      state.mainLeadRecords = mainLeadRecords.length ? mainLeadRecords : state.mainLeadRecords;
+      if (mainLeadRecords.length) {
+        state.mainLeadRecords = mainLeadRecords;
+        state.leadDetails = mainLeadRecords
+          .filter((lead) => lead.hasFu)
+          .map((lead) => ({
+            student: lead.student,
+            school: lead.school,
+            className: lead.className || "",
+            agent: lead.agent,
+            branch: lead.branch,
+            firstDate: lead.firstDate || "",
+            lastDate: lead.lastDate || "",
+            lastStatus: lead.lastStatus || "",
+            frequency: Number(lead.frequency || 0)
+          }));
+      }
       if (preserveSelection) {
         state.selectedDate = previousDate;
         state.selectedWeek = previousWeek;
@@ -2147,13 +2252,39 @@ async function loadSheet(options = {}) {
         state.selectedWeek = getWeekKey(state.selectedDate);
         state.selectedMonth = getMonthKey(state.selectedDate);
       }
+    } else if (window.centralFuRows?.length) {
+      state.rows = [...window.centralFuRows, ...(window.sulselFuRows || [])].filter((row) => isIsoDate(row.date));
+      state.transitions = [
+        ...(window.centralTransitions || []),
+        ...(window.embeddedTransitions || [])
+      ];
+      state.mainLeadRecords = enrichMainLeadRecords(
+        [
+          ...(window.centralMainLeadRecords || []),
+          ...(window.sulselMainLeadRecords || [])
+        ],
+        [
+          ...(window.centralLeadDetails || []),
+          ...(window.sulselLeadDetails || [])
+        ]
+      );
+      state.leadDetails = [
+        ...(window.centralLeadDetails || []),
+        ...(window.sulselLeadDetails || [])
+      ];
     }
 
     render();
     const syncedAt = new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date());
-    el.syncStatus.textContent = `${rows.length} data FU dimuat. Auto sync 1 menit. Terakhir update ${syncedAt}.`;
+    const branchCount = Math.max(0, validSources.length - 1);
+    const branchLabel = branchCount ? ` + ${branchCount} branch Sulsel` : "";
+    const localCount = state.rows.filter((row) => sulselBranchSources.some((source) => source.name === row.branch)).length;
+    el.syncStatus.textContent = `${rows.length || localCount} data FU dimuat${branchLabel}. Auto sync 1 menit. Terakhir update ${syncedAt}.`;
   } catch (error) {
-    if (!silent) el.syncStatus.textContent = `${error.message} Data contoh tetap ditampilkan.`;
+    if (!silent) {
+      const localCount = state.rows.filter((row) => sulselBranchSources.some((source) => source.name === row.branch)).length;
+      el.syncStatus.textContent = `${error.message} Data lokal Sulsel tetap ditampilkan (${localCount} data FU).`;
+    }
   } finally {
     isSyncing = false;
   }
@@ -2230,4 +2361,13 @@ el.periodTabs.forEach((tab) => {
 });
 
 if (!applySavedLogin()) render();
-loadValidationAgentsOnly();
+loadValidationAgentsOnly().finally(() => {
+  if (canSyncOnline && navigator.onLine) {
+    loadSheet();
+    startAutoSync();
+  } else {
+    el.syncStatus.textContent = canSyncOnline
+      ? "Data lokal siap digunakan. Koneksi online tidak tersedia."
+      : "Data lokal siap digunakan. Sinkronisasi online tersedia saat dashboard memakai server.";
+  }
+});
