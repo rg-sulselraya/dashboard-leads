@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Monitoring Data Leads</title>
-    <link rel="stylesheet" href="styles.css?v=93" />
+    <link rel="stylesheet" href="styles.css?v=95" />
   </head>
   <body class="auth-locked">
     <main class="sheet-dashboard">
@@ -83,6 +83,17 @@
         </div>
       </section>
 
+      <section class="regional-insight" aria-label="Insight regional">
+        <div class="section-heading">
+          <div>
+            <span>Insight Regional</span>
+            <strong id="regionalInsightTitle">Perbandingan Semua Regional</strong>
+          </div>
+          <small id="regionalInsightPeriod">Periode aktif</small>
+        </div>
+        <div id="regionalInsightBody" class="regional-insight-body"></div>
+      </section>
+
       <section class="summary-strip" aria-label="Ringkasan">
         <article>
           <span>Total FU</span>
@@ -141,7 +152,17 @@
             <span>Rekap Agen</span>
             <strong>Aktivitas FU per Branch</strong>
           </div>
-          <small id="agentBranchRecapPeriod">Periode aktif</small>
+          <div class="recap-heading-actions">
+            <label class="recap-filter">
+              <span>Status Branch</span>
+              <select id="branchRecapFilter" aria-label="Filter status FU branch">
+                <option value="all">Semua Branch</option>
+                <option value="fu">Sudah FU</option>
+                <option value="pending">Belum FU</option>
+              </select>
+            </label>
+            <small id="agentBranchRecapPeriod">Periode aktif</small>
+          </div>
         </div>
         <div class="table-shell">
           <table>
@@ -179,10 +200,40 @@
       </section>
 
       <section class="period-board agents-board" data-period="agents">
+        <section class="agent-ranking-grid" aria-label="Ranking performa agen">
+          <article class="agent-ranking-card paid-ranking">
+            <div class="ranking-heading">
+              <span>Agen %Paid</span>
+              <small>5 tertinggi</small>
+            </div>
+            <div id="paidAgentRanking" class="agent-ranking-list"></div>
+          </article>
+          <article class="agent-ranking-card connected-ranking">
+            <div class="ranking-heading">
+              <span>Agen %Connected</span>
+              <small>5 tertinggi</small>
+            </div>
+            <div id="connectedAgentRanking" class="agent-ranking-list"></div>
+          </article>
+          <article class="agent-ranking-card no-response-ranking">
+            <div class="ranking-heading">
+              <span>Agen %No Respon</span>
+              <small>5 tertinggi</small>
+            </div>
+            <div id="noResponseAgentRanking" class="agent-ranking-list"></div>
+          </article>
+          <article class="agent-ranking-card talk-ranking">
+            <div class="ranking-heading">
+              <span>Agen %Talk Time</span>
+              <small>5 tertinggi</small>
+            </div>
+            <div id="talkAgentRanking" class="agent-ranking-list"></div>
+          </article>
+        </section>
         <div class="agent-detail-controls" aria-label="Filter detail agen">
           <div class="agent-filter-title">
             <strong>Filter Detail Leads</strong>
-            <span>Pilih agen atau status untuk melihat rincian lead</span>
+            <span>Pilih agen atau status terakhir FU untuk melihat rincian lead</span>
           </div>
           <label>
             <span>Nama Agen</span>
@@ -232,11 +283,11 @@
     </main>
 
     <script src="sheet-data.js?v=3"></script>
-    <script src="central-fu-data.js?v=2"></script>
+    <script src="central-fu-data.js?v=4"></script>
     <script src="sulsel-data.js?v=3"></script>
     <script src="cbc-data.js?v=1"></script>
     <script src="main-leads.js?v=4"></script>
     <script src="lead-detail.js?v=3"></script>
-    <script src="script.js?v=95"></script>
+    <script src="script.js?v=106"></script>
   </body>
 </html>

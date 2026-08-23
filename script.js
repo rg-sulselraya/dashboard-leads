@@ -567,6 +567,10 @@ const state = {
   lockedBranch: ""
 };
 
+const recapFilterState = {
+  branch: "all"
+};
+
 const defaultSheetUrl = "https://docs.google.com/spreadsheets/d/1m-UZxq6jTF5bOCEVlcoqy1pRYL02or5MqEPp-xzzi7k/edit?gid=0#gid=0";
 const sulselBranchSources = [
   { name: "Bone - Ahmad Yani", gid: "197168761" },
@@ -664,6 +668,15 @@ const el = {
   agentBranchRecapHead: document.querySelector("#agentBranchRecapHead"),
   agentBranchRecapBody: document.querySelector("#agentBranchRecapBody"),
   agentBranchRecapPeriod: document.querySelector("#agentBranchRecapPeriod"),
+  branchRecapFilter: document.querySelector("#branchRecapFilter"),
+  regionalInsight: document.querySelector(".regional-insight"),
+  regionalInsightTitle: document.querySelector("#regionalInsightTitle"),
+  regionalInsightPeriod: document.querySelector("#regionalInsightPeriod"),
+  regionalInsightBody: document.querySelector("#regionalInsightBody"),
+  paidAgentRanking: document.querySelector("#paidAgentRanking"),
+  connectedAgentRanking: document.querySelector("#connectedAgentRanking"),
+  noResponseAgentRanking: document.querySelector("#noResponseAgentRanking"),
+  talkAgentRanking: document.querySelector("#talkAgentRanking"),
   agentRecapHead: document.querySelector("#agentRecapHead"),
   agentRecapBody: document.querySelector("#agentRecapBody"),
   agentRecapPanel: document.querySelector("#agentRecapPanel"),
@@ -737,7 +750,8 @@ function isIsoDate(value) {
   const parsed = new Date(Date.UTC(year, month - 1, day));
   return parsed.getUTCFullYear() === year
     && parsed.getUTCMonth() === month - 1
-    && parsed.getUTCDate() === day;
+    && parsed.getUTCDate() === day
+    && parsed <= new Date();
 }
 
 function isVacantName(name) {
@@ -1029,7 +1043,9 @@ function renderPickers() {
   const months = uniqueSorted(state.rows.map((row) => getMonthKey(row.date)));
   const today = isoDate(new Date());
 
-  if (!state.selectedDate) state.selectedDate = dates.at(-1) || today;
+  if (!dates.includes(state.selectedDate) || state.selectedDate > today) {
+    state.selectedDate = dates.at(-1) || today;
+  }
   if (!weeks.includes(state.selectedWeek)) state.selectedWeek = weeks.at(-1) || getWeekKey(state.selectedDate);
   if (!months.includes(state.selectedMonth)) state.selectedMonth = months.at(-1) || getMonthKey(state.selectedDate);
 
@@ -1263,7 +1279,13 @@ function renderBranchSummary(rows) {
 
 function renderAgentBranchRecap() {
   if (!el.agentBranchRecapHead || !el.agentBranchRecapBody) return;
+  const shouldShow = ["daily", "weekly", "monthly"].includes(state.activePeriod);
+  const recapPanel = el.agentBranchRecapHead.closest(".agent-branch-recap");
+  if (recapPanel) recapPanel.hidden = !shouldShow;
+  if (!shouldShow) return;
 
+  const branchFilterValue = el.branchRecapFilter?.value || recapFilterState.branch;
+  recapFilterState.branch = branchFilterValue;
   const roster = mergeAgentMaster(state.agents)
     .filter((agent) => !isVacantName(agent.name))
     .filter((agent) => state.selectedRegional === "all"
@@ -1290,7 +1312,10 @@ function renderAgentBranchRecap() {
   }).filter((row) => state.selectedRegional === "all"
     ? state.selectedBranch === "all" || row.branch === state.selectedBranch
     : branchRegionalMap[row.branch] === state.selectedRegional
-      && (state.selectedBranch === "all" || row.branch === state.selectedBranch));
+      && (state.selectedBranch === "all" || row.branch === state.selectedBranch))
+    .filter((row) => branchFilterValue === "all"
+      || (branchFilterValue === "fu" && row.fuAgents > 0)
+      || (branchFilterValue === "pending" && row.fuAgents === 0));
 
   el.agentBranchRecapHead.innerHTML = `
     <tr>
@@ -1325,6 +1350,181 @@ function renderAgentBranchRecap() {
       ? periodLabel
       : `${periodLabel} - ${state.selectedRegional.replace("Regional - ", "")}`;
   }
+  if (el.branchRecapFilter) {
+    el.branchRecapFilter.value = recapFilterState.branch;
+    el.branchRecapFilter.disabled = false;
+  }
+}
+
+function renderRegionalInsight() {
+  if (!el.regionalInsight || !el.regionalInsightBody) return;
+  const shouldShow = state.selectedRegional === "all"
+    && ["daily", "weekly", "monthly"].includes(state.activePeriod)
+    && !document.body.classList.contains("agents-mode")
+    && state.activePeriod !== "cbc";
+  el.regionalInsight.hidden = !shouldShow;
+  if (!shouldShow) return;
+
+  const roster = mergeAgentMaster(state.agents)
+    .filter((agent) => !isVacantName(agent.name))
+    .filter((agent) => state.selectedRegional === "all"
+      || regionalForAgent(agent) === state.selectedRegional)
+    .filter((agent) => state.selectedBranch === "all"
+      || agent.branch === state.selectedBranch);
+  const activeRows = currentRows().filter((row) => row.status !== "Talk Time");
+  const positiveStatuses = ["Paid", "Hold", "Prospek", "Connected"];
+  const regionalNames = state.selectedRegional === "all"
+    ? allowedRegionals
+    : [state.selectedRegional];
+  const regionalRows = regionalNames.map((regional) => {
+    const regionalAgents = roster.filter((agent) => regionalForAgent(agent) === regional);
+    const branchNames = new Set(regionalAgents.map((agent) => agent.branch));
+    const rows = activeRows.filter((row) => branchNames.has(row.branch));
+    const fuAgents = new Set(rows
+      .filter((row) => fuStatusColumns.includes(row.status) && Number(row.count || 0) > 0)
+      .map((row) => row.agent));
+    const leads = rows.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const noResponse = rows
+      .filter((row) => row.status === "No Respon")
+      .reduce((sum, row) => sum + Number(row.count || 0), 0);
+    const positive = rows
+      .filter((row) => positiveStatuses.includes(row.status))
+      .reduce((sum, row) => sum + Number(row.count || 0), 0);
+    return {
+      regional,
+      agents: regionalAgents.length,
+      fuAgents: fuAgents.size,
+      leads,
+      noResponse,
+      noResponseRate: leads ? Math.round((noResponse / leads) * 100) : 0,
+      positive
+    };
+  });
+
+  const branchRows = Object.entries(activeRows.reduce((summary, row) => {
+    const branch = row.branch || "Tanpa Cabang";
+    if (!summary[branch]) summary[branch] = { fu: 0, noResponse: 0, positive: 0 };
+    const count = Number(row.count || 0);
+    summary[branch].fu += count;
+    if (row.status === "No Respon") summary[branch].noResponse += count;
+    if (positiveStatuses.includes(row.status)) summary[branch].positive += count;
+    return summary;
+  }, {}))
+    .map(([branch, value]) => ({
+      branch,
+      ...value,
+      noResponseRate: value.fu ? Math.round((value.noResponse / value.fu) * 100) : 0
+    }))
+    .filter((row) => row.fu > 0)
+    .sort((a, b) => b.fu - a.fu || a.branch.localeCompare(b.branch));
+  const topBranch = branchRows[0];
+  const riskBranch = [...branchRows]
+    .filter((row) => row.fu >= 10)
+    .sort((a, b) => b.noResponseRate - a.noResponseRate || b.noResponse - a.noResponse)[0];
+  const topRegional = [...regionalRows].sort((a, b) => b.leads - a.leads)[0];
+  const totalAgents = roster.length;
+  const totalFuAgents = new Set(activeRows
+    .filter((row) => fuStatusColumns.includes(row.status) && Number(row.count || 0) > 0)
+    .map((row) => row.agent)).size;
+  const agentRate = totalAgents ? Math.round((totalFuAgents / totalAgents) * 100) : 0;
+
+  const periodLabel = state.activePeriod === "daily"
+    ? `Daily - ${formatShortDate(state.selectedDate)}`
+    : state.activePeriod === "weekly"
+      ? `Weekly - ${getWeekLabel(state.selectedWeek)}`
+      : state.activePeriod === "monthly"
+        ? `Monthly - ${monthName(state.selectedMonth)}`
+        : state.activePeriod === "agents"
+          ? "All Agen"
+          : state.activePeriod === "cbc"
+            ? "Leads CBC"
+            : "Analisis NR";
+  el.regionalInsightTitle.textContent = state.selectedRegional === "all"
+    ? "Perbandingan Semua Regional"
+    : `Insight ${state.selectedRegional.replace("Regional - ", "")}`;
+  el.regionalInsightPeriod.textContent = periodLabel;
+  el.regionalInsightBody.innerHTML = `
+    <div class="regional-kpi-grid">
+      <div class="regional-kpi">
+        <span>Regional dengan FU tertinggi</span>
+        <strong>${escapeHtml(topRegional?.regional.replace("Regional - ", "") || "-")}</strong>
+        <small>${topRegional?.leads || 0} FU pada periode ini</small>
+      </div>
+      <div class="regional-kpi">
+        <span>Branch paling aktif</span>
+        <strong>${escapeHtml(topBranch?.branch || "-")}</strong>
+        <small>${topBranch?.fu || 0} FU${topBranch ? `, ${topBranch.positive} positif` : ""}</small>
+      </div>
+      <div class="regional-kpi">
+        <span>Branch No Respon tertinggi</span>
+        <strong>${escapeHtml(riskBranch?.branch || "-")}</strong>
+        <small>${riskBranch ? `${riskBranch.noResponseRate}% dari ${riskBranch.fu} FU` : "Belum ada data"}</small>
+      </div>
+      <div class="regional-kpi">
+        <span>Agen sudah melakukan FU</span>
+        <strong>${totalFuAgents} / ${totalAgents}</strong>
+        <small>${agentRate}% dari roster agen aktif</small>
+      </div>
+    </div>
+    <div class="regional-comparison">
+      ${regionalRows.map((row) => `
+        <div class="regional-comparison-row">
+          <strong>${escapeHtml(row.regional.replace("Regional - ", ""))}</strong>
+          <span>${row.leads} FU</span>
+          <span>${row.fuAgents}/${row.agents} agen FU</span>
+          <span class="${row.noResponseRate >= 60 ? "regional-risk" : "regional-good"}">${row.noResponseRate}% No Respon</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAgentRankings() {
+  const targets = [
+    ["Paid", el.paidAgentRanking],
+    ["Connected", el.connectedAgentRanking],
+    ["No Respon", el.noResponseAgentRanking],
+    ["Talk Time", el.talkAgentRanking]
+  ];
+  if (targets.some(([, target]) => !target)) return;
+
+  const leadRecords = filteredMainLeadRecords();
+  const agents = getAgentMaster(state.rows).map((agent) => {
+    const agentLeads = leadRecords.filter((lead) => lead.agent === agent.name);
+    const totals = Object.fromEntries(statusColumns.map((status) => [
+      status,
+      status === "Talk Time"
+        ? agentLeads.reduce((sum, lead) => sum + Number(lead.talk || 0), 0)
+        : agentLeads.filter((lead) => lead.lastStatus === status).length
+    ]));
+    const totalLeads = agentLeads.length;
+    return { name: agent.name, branch: agent.branch, totals, totalLeads };
+  });
+
+  targets.forEach(([status, target]) => {
+    const ranked = agents
+      .map((agent) => ({
+        ...agent,
+        value: agent.totals[status],
+        percent: agent.totalLeads ? (agent.totals[status] / agent.totalLeads) * 100 : 0
+      }))
+      .filter((agent) => agent.value > 0)
+      .sort((a, b) => b.percent - a.percent || b.value - a.value || a.name.localeCompare(b.name))
+      .slice(0, 5);
+
+    target.innerHTML = ranked.map((agent, index) => `
+      <div class="agent-ranking-row">
+        <span class="ranking-number">${agent.percent.toFixed(1)}%</span>
+        <div
+          class="ranking-agent"
+          data-tooltip="${escapeHtml(`${agent.name} - ${agent.branch || "Tanpa Cabang"}: ${agent.value.toLocaleString("id-ID")} ${status} dari ${agent.totalLeads.toLocaleString("id-ID")} leads`)}"
+        >
+          <strong>${escapeHtml(agent.name)}</strong>
+          <small>${escapeHtml(agent.branch || "Tanpa Cabang")} · ${agent.value.toLocaleString("id-ID")} ${status} dari ${agent.totalLeads.toLocaleString("id-ID")} leads</small>
+        </div>
+      </div>
+    `).join("") || `<div class="empty-insight">Belum ada data.</div>`;
+  });
 }
 
 function renderAgentRecap(rows) {
@@ -1887,7 +2087,6 @@ function renderInsights() {
   renderTransitions();
   renderTopAgents(rows);
   renderBranchSummary(rows);
-  renderAgentRecap(rows);
 }
 
 function renderActivePeriod() {
@@ -1909,17 +2108,38 @@ function render() {
   renderRegionalOptions();
   renderBranchOptions();
   renderPickers();
-  renderHead(el.dailyHead);
-  renderHead(el.weeklyHead);
-  renderHead(el.monthlyHead);
-  renderBody(el.dailyBody, rowsForDaily());
-  renderBody(el.weeklyBody, rowsForWeekly());
-  renderBody(el.monthlyBody, rowsForMonthly());
-  renderCbcLeads();
-  renderNrAnalysis();
-  renderSummary();
-  renderInsights();
-  renderAgentBranchRecap();
+  if (["daily", "weekly", "monthly"].includes(state.activePeriod)) {
+    const periodRows = state.activePeriod === "daily"
+      ? rowsForDaily()
+      : state.activePeriod === "weekly"
+        ? rowsForWeekly()
+        : rowsForMonthly();
+    const periodHead = state.activePeriod === "daily"
+      ? el.dailyHead
+      : state.activePeriod === "weekly"
+        ? el.weeklyHead
+        : el.monthlyHead;
+    const periodBody = state.activePeriod === "daily"
+      ? el.dailyBody
+      : state.activePeriod === "weekly"
+        ? el.weeklyBody
+        : el.monthlyBody;
+    renderHead(periodHead);
+    renderBody(periodBody, periodRows);
+    renderSummary();
+    renderInsights();
+    renderAgentBranchRecap();
+    renderRegionalInsight();
+  } else if (state.activePeriod === "agents") {
+    renderAgentRankings();
+    renderAgentRecap(currentRows());
+    renderAgentBranchRecap();
+    renderRegionalInsight();
+  } else if (state.activePeriod === "cbc") {
+    renderCbcLeads();
+  } else if (state.activePeriod === "nr") {
+    renderNrAnalysis();
+  }
 }
 
 function csvToRows(text) {
@@ -2197,18 +2417,24 @@ function sheetCsvUrl(url, sheet, range) {
 }
 
 async function fetchText(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
-  let response;
-  try {
-    response = await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
+  const targets = canSyncOnline
+    ? [`/api/fetch?url=${encodeURIComponent(url)}`, url]
+    : [url];
+  for (const target of targets) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
+    try {
+      const response = await fetch(target, { signal: controller.signal });
+      if (response.ok) {
+        return { ok: true, text: await response.text() };
+      }
+    } catch {
+      // Try the next source, then let the caller keep using local data.
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  return {
-    ok: response.ok,
-    text: response.ok ? await response.text() : ""
-  };
+  return { ok: false, text: "" };
 }
 
 const canSyncOnline = ["http:", "https:"].includes(window.location.protocol);
@@ -2242,9 +2468,9 @@ async function loadValidationAgentsOnly() {
     return;
   }
   try {
-    const response = await fetch(sheetCsvUrl(el.sheetUrl.value || defaultSheetUrl, "Validasi", "A:M"));
-    if (!response.ok) throw new Error("Akses Validasi ditolak.");
-    const validationAgents = parseAgentValidation(await response.text());
+    const result = await fetchText(sheetCsvUrl(el.sheetUrl.value || defaultSheetUrl, "Validasi", "A:M"));
+    if (!result.ok) throw new Error("Akses Validasi ditolak.");
+    const validationAgents = parseAgentValidation(result.text);
     if (!validationAgents.length) throw new Error("Validasi kosong atau belum terbaca.");
     state.agents = mergeAgentMaster(validationAgents);
     render();
@@ -2278,8 +2504,8 @@ async function loadSheet(options = {}) {
     ];
     const [sourceResults, agentResponse, cbcResponse] = await Promise.all([
       Promise.all(sourceRequests),
-      fetch(sheetCsvUrl(sheetUrl, "Validasi", "A:M")).catch(() => ({ ok: false })),
-      fetch(sheetCsvUrl(sheetUrl, "CBC", "A:E")).catch(() => ({ ok: false }))
+      fetchText(sheetCsvUrl(sheetUrl, "Validasi", "A:M")),
+      fetchText(sheetCsvUrl(sheetUrl, "CBC", "A:E"))
     ]);
 
     const mainSource = sourceResults[0];
@@ -2290,12 +2516,12 @@ async function loadSheet(options = {}) {
     const mainLeadRecords = validSources.flatMap((source) => parseMainLeadRecords(source.text));
 
     if (agentResponse.ok) {
-      const validationAgents = parseAgentValidation(await agentResponse.text());
+      const validationAgents = parseAgentValidation(agentResponse.text);
       if (validationAgents.length) state.agents = mergeAgentMaster(validationAgents);
     }
 
     if (cbcResponse.ok) {
-      const liveCbcSchools = parseCbcRows(await cbcResponse.text());
+      const liveCbcSchools = parseCbcRows(cbcResponse.text);
       if (liveCbcSchools.length) {
         state.cbcSchools = liveCbcSchools;
       }
@@ -2325,7 +2551,7 @@ async function loadSheet(options = {}) {
         state.selectedWeek = previousWeek;
         state.selectedMonth = previousMonth;
       } else {
-        state.selectedDate = uniqueSorted(rows.map((row) => row.date)).at(-1);
+        state.selectedDate = latestDateFromRows(rows);
         state.selectedWeek = getWeekKey(state.selectedDate);
         state.selectedMonth = getMonthKey(state.selectedDate);
       }
@@ -2405,15 +2631,21 @@ el.branchFilter.addEventListener("change", (event) => {
   render();
 });
 
-el.agentDetailFilter.addEventListener("change", (event) => {
+el.branchRecapFilter?.addEventListener("change", (event) => {
+  recapFilterState.branch = event.target.value;
+  renderAgentBranchRecap();
+});
+
+el.agentDetailFilter?.addEventListener("change", (event) => {
   state.selectedAgentDetail = event.target.value;
   render();
 });
 
-el.agentStatusFilter.addEventListener("change", (event) => {
+el.agentStatusFilter?.addEventListener("change", (event) => {
   state.selectedLastStatus = event.target.value;
   render();
 });
+
 
 el.cbcLeadBody.addEventListener("click", (event) => {
   const button = event.target.closest(".school-toggle");
