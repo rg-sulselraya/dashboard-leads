@@ -1488,13 +1488,23 @@ function renderAgentRankings() {
   ];
   if (targets.some(([, target]) => !target)) return;
 
+  const rows = applyDashboardFilters(state.rows);
+  const talkTimeByAgent = rows.reduce((summary, row) => {
+    if (row.status === "Talk Time") {
+      summary[row.agent] = (summary[row.agent] || 0) + Number(row.count || 0);
+    }
+    return summary;
+  }, {});
   const leadRecords = filteredMainLeadRecords();
   const agents = getAgentMaster(state.rows).map((agent) => {
     const agentLeads = leadRecords.filter((lead) => lead.agent === agent.name);
     const totals = Object.fromEntries(statusColumns.map((status) => [
       status,
       status === "Talk Time"
-        ? agentLeads.reduce((sum, lead) => sum + Number(lead.talk || 0), 0)
+        ? Math.max(
+          agentLeads.reduce((sum, lead) => sum + Number(lead.talk || 0), 0),
+          talkTimeByAgent[agent.name] || 0
+        )
         : agentLeads.filter((lead) => lead.lastStatus === status).length
     ]));
     const totalLeads = agentLeads.length;
