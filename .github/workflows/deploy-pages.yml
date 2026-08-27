@@ -24,11 +24,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate runtime credentials
-        env:
-          DASHBOARD_CREDENTIALS_JSON: ${{ secrets.DASHBOARD_CREDENTIALS_JSON }}
-        run: node .github/scripts/generate-credentials.mjs
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
