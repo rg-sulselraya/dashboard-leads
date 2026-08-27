@@ -589,13 +589,10 @@ const autoSyncIntervalMs = 60_000;
 let autoSyncTimer = null;
 let isSyncing = false;
 const dashboardCredentials = window.dashboardCredentials || {};
-const adminPassword = String(dashboardCredentials.adminPassword || "").trim().toLowerCase();
-const branchPasswords = Object.fromEntries(
-  Object.entries(dashboardCredentials.branchPasswords || {}).map(([password, branch]) => [
-    String(password).trim().toLowerCase(),
-    branch
-  ])
-);
+const credentialSalt = String(dashboardCredentials.salt || "");
+const credentialIterations = Number(dashboardCredentials.iterations) || 120_000;
+const adminPasswordHash = String(dashboardCredentials.adminPasswordHash || "").toLowerCase();
+const branchPasswordHashes = dashboardCredentials.branchPasswordHashes || {};
 const allowedRegionals = ["Regional - Makassar Raya", "Regional - Sulawesi Selatan"];
 const branchRegionalMap = {
   "Makassar - Cendrawasih": "Regional - Makassar Raya",
@@ -996,14 +993,38 @@ function unlockAdmin() {
   startAutoSync();
 }
 
-function handleLogin(event) {
+async function hashPassword(password) {
+  if (!credentialSalt || !window.crypto?.subtle) return "";
+  const encoder = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const derivedBits = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: encoder.encode(credentialSalt),
+      iterations: credentialIterations,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    256
+  );
+  return Array.from(new Uint8Array(derivedBits), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function handleLogin(event) {
   event.preventDefault();
   const password = String(el.branchPassword.value || "").trim().toLowerCase();
-  if (adminPassword && password === adminPassword) {
+  const passwordHash = await hashPassword(password);
+  if (adminPasswordHash && passwordHash === adminPasswordHash) {
     unlockAdmin();
     return;
   }
-  const branch = branchPasswords[password];
+  const branch = branchPasswordHashes[passwordHash];
   if (!branch) {
     el.loginError.textContent = "Password cabang tidak sesuai.";
     el.branchPassword.select();
@@ -1018,7 +1039,7 @@ function applySavedLogin() {
     return true;
   }
   const branch = sessionStorage.getItem("dashboardBranchAccess");
-  if (branch && Object.values(branchPasswords).includes(branch)) {
+  if (branch && Object.values(branchPasswordHashes).includes(branch)) {
     unlockBranch(branch);
     return true;
   }
