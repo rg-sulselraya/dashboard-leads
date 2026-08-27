@@ -588,26 +588,14 @@ const sulselBranchSources = [
 const autoSyncIntervalMs = 60_000;
 let autoSyncTimer = null;
 let isSyncing = false;
-const adminPassword = "regional01";
-const branchPasswords = {
-  bone27: "Bone - Ahmad Yani",
-  bulukumba54: "Bulukumba - Jend. Sudirman",
-  gowa68: "Gowa - Sungguminasa",
-  baruga41: "Makassar - Baruga",
-  cendrawasih95: "Makassar - Cendrawasih",
-  baher03: "Makassar - Hertasning",
-  perintis02: "Makassar - Perintis",
-  sudiang16: "Makassar - Sudiang",
-  palopo97: "Palopo - Andi Kambo",
-  pangkep80: "Pangkep - Sultan Hasanuddin",
-  parepare73: "Parepare - Mattirotasi",
-  pinrang21: "Pinrang - Jend. Sudirman",
-  sidrap46: "Sidrap - Jenderal Sudirman",
-  soppeng59: "Soppeng - Lalabata",
-  toraja84: "Tana Toraja - Makale",
-  torut62: "Toraja Utara - Poros Bolu",
-  wajo13: "Wajo - Jend. Sudirman"
-};
+const dashboardCredentials = window.dashboardCredentials || {};
+const adminPassword = String(dashboardCredentials.adminPassword || "").trim().toLowerCase();
+const branchPasswords = Object.fromEntries(
+  Object.entries(dashboardCredentials.branchPasswords || {}).map(([password, branch]) => [
+    String(password).trim().toLowerCase(),
+    branch
+  ])
+);
 const allowedRegionals = ["Regional - Makassar Raya", "Regional - Sulawesi Selatan"];
 const branchRegionalMap = {
   "Makassar - Cendrawasih": "Regional - Makassar Raya",
@@ -1011,7 +999,7 @@ function unlockAdmin() {
 function handleLogin(event) {
   event.preventDefault();
   const password = String(el.branchPassword.value || "").trim().toLowerCase();
-  if (password === adminPassword) {
+  if (adminPassword && password === adminPassword) {
     unlockAdmin();
     return;
   }
@@ -1479,6 +1467,26 @@ function renderRegionalInsight() {
   `;
 }
 
+function buildAgentLeadMetrics(agent, leadRecords, talkTimeByAgent = {}) {
+  const agentLeads = leadRecords.filter((lead) => lead.agent === agent.name);
+  const totals = Object.fromEntries(statusColumns.map((status) => [
+    status,
+    status === "Talk Time"
+      ? Math.max(
+        agentLeads.reduce((sum, lead) => sum + Number(lead.talk || 0), 0),
+        talkTimeByAgent[agent.name] || 0
+      )
+      : agentLeads.filter((lead) => lead.lastStatus === status).length
+  ]));
+
+  return {
+    ...agent,
+    agentLeads,
+    totals,
+    totalLeads: agentLeads.length
+  };
+}
+
 function renderAgentRankings() {
   const targets = [
     ["Paid", el.paidAgentRanking],
@@ -1496,20 +1504,7 @@ function renderAgentRankings() {
     return summary;
   }, {});
   const leadRecords = filteredMainLeadRecords();
-  const agents = getAgentMaster(state.rows).map((agent) => {
-    const agentLeads = leadRecords.filter((lead) => lead.agent === agent.name);
-    const totals = Object.fromEntries(statusColumns.map((status) => [
-      status,
-      status === "Talk Time"
-        ? Math.max(
-          agentLeads.reduce((sum, lead) => sum + Number(lead.talk || 0), 0),
-          talkTimeByAgent[agent.name] || 0
-        )
-        : agentLeads.filter((lead) => lead.lastStatus === status).length
-    ]));
-    const totalLeads = agentLeads.length;
-    return { name: agent.name, branch: agent.branch, totals, totalLeads };
-  });
+  const agents = getAgentMaster(state.rows).map((agent) => buildAgentLeadMetrics(agent, leadRecords, talkTimeByAgent));
 
   targets.forEach(([status, target]) => {
     const ranked = agents
@@ -1549,14 +1544,25 @@ function renderAgentRecap(rows) {
       ${statusColumns.map((status) => `<th>${status}</th>`).join("")}
     </tr>
   `;
+  const talkTimeByAgent = rows.reduce((summary, row) => {
+    if (row.status === "Talk Time") {
+      summary[row.agent] = (summary[row.agent] || 0) + Number(row.count || 0);
+    }
+    return summary;
+  }, {});
+  const leadRecords = filteredMainLeadRecords();
   const agents = getAgentMaster(rows)
     .map((agent) => {
-      const agentRows = rows.filter((row) => row.agent === agent.name);
-      const leads = fuStatusColumns.reduce((sum, status) => sum + sumRows(agentRows, status), 0);
+      const metrics = buildAgentLeadMetrics(agent, leadRecords, talkTimeByAgent);
       const utilize = ["Paid", "Hold", "Prospek", "Connected"]
-        .reduce((sum, status) => sum + sumRows(agentRows, status), 0);
-      const utilizeRate = leads ? Math.round((utilize / leads) * 100) : 0;
-      return { ...agent, leads, utilize, utilizeRate, rows: agentRows };
+        .reduce((sum, status) => sum + metrics.totals[status], 0);
+      const utilizeRate = metrics.totalLeads ? Math.round((utilize / metrics.totalLeads) * 100) : 0;
+      return {
+        ...metrics,
+        leads: metrics.totalLeads,
+        utilize,
+        utilizeRate
+      };
     })
     .sort((a, b) => b.leads - a.leads || b.utilize - a.utilize || a.name.localeCompare(b.name));
 
@@ -1567,7 +1573,7 @@ function renderAgentRecap(rows) {
       <td class="total-cell">${agent.utilize || "-"}</td>
       <td><span class="utilize-badge ${utilizeTone(agent.utilizeRate)}" style="--utilize-red:${Math.max(0, (50 - agent.utilizeRate) / 50).toFixed(2)}; --utilize-green:${Math.max(0, (agent.utilizeRate - 50) / 50).toFixed(2)}">${agent.leads ? `${agent.utilizeRate}%` : "-"}</span></td>
       ${statusColumns.map((status) => {
-        const value = sumRows(agent.rows, status);
+        const value = agent.totals[status];
         return `<td class="${value ? "" : "empty-cell"}">${value || "-"}</td>`;
       }).join("")}
     </tr>
@@ -1851,9 +1857,12 @@ function renderProgressBar(value) {
   `;
 }
 
+function cbcLeadRecords() {
+  return state.mainLeadRecords.filter((lead) => String(lead.updatedAt || "").trim());
+}
+
 function buildCbcRows() {
-  const rowsBySchool = state.mainLeadRecords.reduce((summary, lead) => {
-    if (!String(lead.updatedAt || "").trim()) return summary;
+  const rowsBySchool = cbcLeadRecords().reduce((summary, lead) => {
     const key = schoolKey(lead.school);
     if (!key) return summary;
     const student = schoolKey(lead.student);
@@ -1893,8 +1902,7 @@ function buildCbcRows() {
 }
 
 function buildCbcSchoolWeeklyDetails(schoolName) {
-  const records = state.mainLeadRecords
-    .filter((lead) => String(lead.updatedAt || "").trim())
+  const records = cbcLeadRecords()
     .filter((lead) => schoolKey(lead.school) === schoolKey(schoolName));
   const weekly = records.reduce((summary, lead) => {
     const key = lead.weekActivity || "Tanpa Week";
@@ -2004,8 +2012,7 @@ function renderNoResponseInsight(rows) {
 }
 
 function buildCbcWeekAgentRows(schoolName, weekKey) {
-  const records = state.mainLeadRecords
-    .filter((lead) => String(lead.updatedAt || "").trim())
+  const records = cbcLeadRecords()
     .filter((lead) => schoolKey(lead.school) === schoolKey(schoolName))
     .filter((lead) => schoolKey(lead.weekActivity || "Tanpa Week") === weekKey);
   const byAgent = records.reduce((summary, lead) => {
@@ -2246,7 +2253,6 @@ function parseMainLeadRecords(csvText) {
   if (headers.includes("hasil_fu_1") || headers.includes("tanggal_fu_1")) {
     return parsed.map((row) => {
       const record = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
-      if (!String(row[0] || "").trim()) return null;
       const attempts = [0, 1, 2, 3, 4, 5]
         .map((index) => {
           const base = 18 + index * 5;
@@ -2258,7 +2264,7 @@ function parseMainLeadRecords(csvText) {
         .filter((attempt) => isIsoDate(attempt.date) && attempt.status)
         .sort((a, b) => parseDate(a.date) - parseDate(b.date));
       return {
-        updatedAt: row[0] || firstCell(record, ["Updated At"]) || "",
+        updatedAt: firstCell(record, ["Updated At", "Update At"]),
         student: row[9] || firstCell(record, ["Nama Siswa", "Student", "Nama"]) || "",
         school: row[5] || firstCell(record, ["Asal Sekolah", "School Name", "Nama Sekolah", "Sekolah", "School"]) || "",
         className: row[10] || firstCell(record, ["User Class", "Kelas", "Class"]) || "",
