@@ -1219,20 +1219,10 @@ function renderTransitions() {
 }
 
 function transitionTone(from, to) {
-  const rank = {
-    "Belum di FU": -2,
-    Invalid: -1,
-    "No Respon": 0,
-    Hold: 1,
-    Prospek: 2,
-    Connected: 3,
-    Paid: 4,
-    "Lost Deal": -1
-  };
   if (from === "Belum di FU") return "baru";
   if (from === to) return "tetap";
-  const fromRank = rank[from] ?? 0;
-  const toRank = rank[to] ?? 0;
+  const fromRank = transitionRank[from] ?? 0;
+  const toRank = transitionRank[to] ?? 0;
   return toRank > fromRank ? "naik" : "turun";
 }
 
