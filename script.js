@@ -1,5 +1,14 @@
 const statusColumns = ["Paid", "Hold", "Prospek", "Connected", "No Respon", "Lost Deal", "Invalid", "Talk Time"];
 const fuStatusColumns = statusColumns.filter((status) => status !== "Talk Time");
+const transitionRank = {
+  "Belum di FU": 0,
+  "Lost Deal": 1,
+  "No Respon": 2,
+  Connected: 3,
+  Prospek: 4,
+  Hold: 5,
+  Paid: 6
+};
 
 const fallbackAgents = [
   {
@@ -1115,7 +1124,9 @@ function currentRows() {
 }
 
 function currentTransitions() {
-  const filtered = applyTransitionFilters(state.transitions);
+  const filtered = applyTransitionFilters(state.transitions).filter((transition) => (
+    transition.from !== "Invalid" && transition.to !== "Invalid"
+  ));
   if (state.activePeriod === "daily") {
     return filtered.filter((transition) => transition.date === state.selectedDate);
   }
@@ -1169,7 +1180,14 @@ function renderTransitions() {
       const [from, to] = label.split(" -> ");
       return { label, value, tone: transitionTone(from, to) };
     })
-    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    .sort((a, b) => {
+      const [aFrom, aTo] = a.label.split(" -> ");
+      const [bFrom, bTo] = b.label.split(" -> ");
+      return (transitionRank[bTo] ?? -1) - (transitionRank[aTo] ?? -1)
+        || (transitionRank[bFrom] ?? -1) - (transitionRank[aFrom] ?? -1)
+        || b.value - a.value
+        || a.label.localeCompare(b.label);
+    });
   const total = transitions.length;
   const summary = transitions.reduce((counts, transition) => {
     counts[transitionTone(transition.from, transition.to)] += 1;
