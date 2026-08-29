@@ -602,6 +602,108 @@ const credentialSalt = String(dashboardCredentials.salt || "");
 const credentialIterations = Number(dashboardCredentials.iterations) || 120_000;
 const adminPasswordHash = String(dashboardCredentials.adminPasswordHash || "").toLowerCase();
 const branchPasswordHashes = dashboardCredentials.branchPasswordHashes || {};
+const dashboardApiBase = String(window.dashboardApiBase || "").trim().replace(/\/+$/, "");
+const dashboardSessionKey = "dashboardSessionToken";
+const localApiHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
+const dashboardApiTimeoutMs = 3_000;
+
+function dashboardApiUrl(pathname) {
+  return `${dashboardApiBase}${pathname}`;
+}
+
+function shouldUseDashboardApi() {
+  return Boolean(dashboardApiBase)
+    || (window.location.protocol === "http:" && localApiHostnames.has(window.location.hostname));
+}
+
+function dashboardApiHeaders() {
+  const token = sessionStorage.getItem(dashboardSessionKey);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function requestDashboardApi(pathname, options = {}, timeoutMs = dashboardApiTimeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(dashboardApiUrl(pathname), {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...dashboardApiHeaders(),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {})
+      },
+      signal: controller.signal
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readJsonResponse(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function isDashboardApiUnavailable(response) {
+  return !response || response.status === 404 || response.status === 405;
+}
+
+async function loginWithDashboardApi(password) {
+  if (!shouldUseDashboardApi()) return { available: false };
+
+  const response = await requestDashboardApi("/api/login", {
+    method: "POST",
+    body: JSON.stringify({ password })
+  });
+  if (isDashboardApiUnavailable(response)) return { available: false };
+
+  const payload = await readJsonResponse(response);
+  if (response.ok && payload.ok && payload.token) {
+    return {
+      available: true,
+      ok: true,
+      token: String(payload.token),
+      accessMode: payload.accessMode,
+      branch: String(payload.branch || "")
+    };
+  }
+  return {
+    available: true,
+    ok: false,
+    message: String(payload.message || "Login gagal. Silakan coba lagi.")
+  };
+}
+
+async function readDashboardSession() {
+  if (!shouldUseDashboardApi()) return { available: false, session: null };
+
+  const response = await requestDashboardApi("/api/session");
+  if (isDashboardApiUnavailable(response)) return { available: false, session: null };
+
+  const payload = await readJsonResponse(response);
+  if (response.ok && payload.ok && ["admin", "branch"].includes(payload.accessMode)) {
+    return {
+      available: true,
+      session: {
+        accessMode: payload.accessMode,
+        branch: String(payload.branch || "")
+      }
+    };
+  }
+  return { available: true, session: null };
+}
+
+function clearSavedLogin() {
+  sessionStorage.removeItem(dashboardSessionKey);
+  sessionStorage.removeItem("dashboardAccessMode");
+  sessionStorage.removeItem("dashboardBranchAccess");
+}
 const allowedRegionals = ["Regional - Makassar Raya", "Regional - Sulawesi Selatan"];
 const branchRegionalMap = {
   "Makassar - Cendrawasih": "Regional - Makassar Raya",
@@ -1002,48 +1104,340 @@ function unlockAdmin() {
   startAutoSync();
 }
 
+const sha256RoundConstants = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+  0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+  0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+  0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+  0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+
+const sha256InitialHash = [
+  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+  0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+];
+
+function rotateRight(value, amount) {
+  return (value >>> amount) | (value << (32 - amount));
+}
+
+function sha256(bytes) {
+  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 4, (bytes.length * 8) >>> 0);
+
+  const words = new Uint32Array(64);
+  const hash = sha256InitialHash.slice();
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const s0 = rotateRight(words[index - 15], 7)
+        ^ rotateRight(words[index - 15], 18)
+        ^ (words[index - 15] >>> 3);
+      const s1 = rotateRight(words[index - 2], 17)
+        ^ rotateRight(words[index - 2], 19)
+        ^ (words[index - 2] >>> 10);
+      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, h] = hash;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choice = (e & f) ^ (~e & g);
+      const temp1 = (h + sum1 + choice + sha256RoundConstants[index] + words[index]) >>> 0;
+      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (sum0 + majority) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+    hash[0] = (hash[0] + a) >>> 0;
+    hash[1] = (hash[1] + b) >>> 0;
+    hash[2] = (hash[2] + c) >>> 0;
+    hash[3] = (hash[3] + d) >>> 0;
+    hash[4] = (hash[4] + e) >>> 0;
+    hash[5] = (hash[5] + f) >>> 0;
+    hash[6] = (hash[6] + g) >>> 0;
+    hash[7] = (hash[7] + h) >>> 0;
+  }
+
+  const result = new Uint8Array(32);
+  const resultView = new DataView(result.buffer);
+  hash.forEach((value, index) => resultView.setUint32(index * 4, value));
+  return result;
+}
+
+function sha256PaddedTwoBlocks(buffer, view, words, output, outputView) {
+  let h0 = sha256InitialHash[0];
+  let h1 = sha256InitialHash[1];
+  let h2 = sha256InitialHash[2];
+  let h3 = sha256InitialHash[3];
+  let h4 = sha256InitialHash[4];
+  let h5 = sha256InitialHash[5];
+  let h6 = sha256InitialHash[6];
+  let h7 = sha256InitialHash[7];
+
+  for (let offset = 0; offset < 128; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const word15 = words[index - 15];
+      const word2 = words[index - 2];
+      const s0 = rotateRight(word15, 7) ^ rotateRight(word15, 18) ^ (word15 >>> 3);
+      const s1 = rotateRight(word2, 17) ^ rotateRight(word2, 19) ^ (word2 >>> 10);
+      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+    }
+
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choice = (e & f) ^ (~e & g);
+      const temp1 = (h + sum1 + choice + sha256RoundConstants[index] + words[index]) >>> 0;
+      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (sum0 + majority) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+    h5 = (h5 + f) >>> 0;
+    h6 = (h6 + g) >>> 0;
+    h7 = (h7 + h) >>> 0;
+  }
+
+  outputView.setUint32(0, h0);
+  outputView.setUint32(4, h1);
+  outputView.setUint32(8, h2);
+  outputView.setUint32(12, h3);
+  outputView.setUint32(16, h4);
+  outputView.setUint32(20, h5);
+  outputView.setUint32(24, h6);
+  outputView.setUint32(28, h7);
+  return output;
+}
+
+function createHmacSha256Context(key) {
+  const normalizedKey = key.length > 64 ? sha256(key) : key;
+  const innerPad = new Uint8Array(64);
+  const outerPad = new Uint8Array(64);
+  const innerBuffer = new Uint8Array(128);
+  const outerBuffer = new Uint8Array(128);
+  for (let index = 0; index < 64; index += 1) {
+    const value = normalizedKey[index] || 0;
+    innerPad[index] = value ^ 0x36;
+    outerPad[index] = value ^ 0x5c;
+  }
+  return {
+    innerPad,
+    outerPad,
+    innerBuffer,
+    outerBuffer,
+    innerView: new DataView(innerBuffer.buffer),
+    outerView: new DataView(outerBuffer.buffer),
+    words: new Uint32Array(64),
+    innerHash: new Uint8Array(32),
+    innerHashView: null
+  };
+}
+
+function hmacSha256Into(context, message, output, outputView) {
+  const innerLength = 64 + message.length;
+  const outerLength = 96;
+  if (innerLength > 119) throw new Error("Credential salt terlalu panjang.");
+
+  context.innerBuffer.set(context.innerPad);
+  context.innerBuffer.fill(0, innerLength, 120);
+  context.innerBuffer.set(message, 64);
+  context.innerBuffer[innerLength] = 0x80;
+  context.innerView.setUint32(120, 0);
+  context.innerView.setUint32(124, innerLength * 8);
+  sha256PaddedTwoBlocks(
+    context.innerBuffer,
+    context.innerView,
+    context.words,
+    context.innerHash,
+    context.innerHashView
+  );
+
+  context.outerBuffer.set(context.outerPad);
+  context.outerBuffer.fill(0, outerLength, 120);
+  context.outerBuffer.set(context.innerHash, 64);
+  context.outerBuffer[outerLength] = 0x80;
+  context.outerView.setUint32(120, 0);
+  context.outerView.setUint32(124, outerLength * 8);
+  sha256PaddedTwoBlocks(
+    context.outerBuffer,
+    context.outerView,
+    context.words,
+    output,
+    outputView || new DataView(output.buffer)
+  );
+  return output;
+}
+
+async function pbkdf2Sha256(password, salt, iterations, keyLength) {
+  const blockCount = Math.ceil(keyLength / 32);
+  const derived = new Uint8Array(keyLength);
+  const context = createHmacSha256Context(password);
+  context.innerHashView = new DataView(context.innerHash.buffer);
+  const message = new Uint8Array(salt.length + 4);
+  message.set(salt);
+  const messageView = new DataView(message.buffer);
+  let u = new Uint8Array(32);
+  let nextU = new Uint8Array(32);
+  let uView = new DataView(u.buffer);
+  let nextUView = new DataView(nextU.buffer);
+  const result = new Uint8Array(32);
+  for (let block = 1; block <= blockCount; block += 1) {
+    messageView.setUint32(salt.length, block);
+    hmacSha256Into(context, message, u, uView);
+    result.set(u);
+    for (let iteration = 1; iteration < iterations; iteration += 1) {
+      hmacSha256Into(context, u, nextU, nextUView);
+      for (let index = 0; index < result.length; index += 1) result[index] ^= nextU[index];
+      const previousU = u;
+      u = nextU;
+      nextU = previousU;
+      const previousView = uView;
+      uView = nextUView;
+      nextUView = previousView;
+      if ((iteration & 4095) === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    derived.set(result.subarray(0, Math.min(32, keyLength - (block - 1) * 32)), (block - 1) * 32);
+  }
+  return derived;
+}
+
 async function hashPassword(password) {
-  if (!credentialSalt || !window.crypto?.subtle) return "";
+  if (!credentialSalt || typeof TextEncoder === "undefined") return "";
   const encoder = new TextEncoder();
-  const keyMaterial = await window.crypto.subtle.importKey(
-    "raw",
+  if (window.crypto?.subtle) {
+    try {
+      const keyMaterial = await window.crypto.subtle.importKey(
+        "raw",
+        encoder.encode(password),
+        "PBKDF2",
+        false,
+        ["deriveBits"]
+      );
+      const derivedBits = await window.crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          salt: encoder.encode(credentialSalt),
+          iterations: credentialIterations,
+          hash: "SHA-256"
+        },
+        keyMaterial,
+        256
+      );
+      return Array.from(new Uint8Array(derivedBits), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Continue with the compatibility implementation for file:// pages.
+    }
+  }
+  const derivedBits = await pbkdf2Sha256(
     encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
+    encoder.encode(credentialSalt),
+    credentialIterations,
+    32
   );
-  const derivedBits = await window.crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt: encoder.encode(credentialSalt),
-      iterations: credentialIterations,
-      hash: "SHA-256"
-    },
-    keyMaterial,
-    256
-  );
-  return Array.from(new Uint8Array(derivedBits), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(derivedBits, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function handleLogin(event) {
   event.preventDefault();
   const password = String(el.branchPassword.value || "").trim().toLowerCase();
-  const passwordHash = await hashPassword(password);
-  if (adminPasswordHash && passwordHash === adminPasswordHash) {
-    unlockAdmin();
-    return;
-  }
-  const branch = branchPasswordHashes[passwordHash];
-  if (!branch) {
-    el.loginError.textContent = "Password cabang tidak sesuai.";
+  const submitButton = event.submitter || el.loginForm.querySelector("button[type=submit]");
+  if (submitButton) submitButton.disabled = true;
+  el.loginError.textContent = "Memeriksa password...";
+
+  try {
+    const apiLogin = await loginWithDashboardApi(password);
+    if (apiLogin.available) {
+      if (!apiLogin.ok) {
+        el.loginError.textContent = apiLogin.message;
+        el.branchPassword.select();
+        return;
+      }
+      sessionStorage.setItem(dashboardSessionKey, apiLogin.token);
+      if (apiLogin.accessMode === "admin") {
+        unlockAdmin();
+        return;
+      }
+      if (apiLogin.accessMode === "branch" && apiLogin.branch) {
+        unlockBranch(apiLogin.branch);
+        return;
+      }
+      clearSavedLogin();
+      throw new Error("Respons login server tidak valid.");
+    }
+
+    const passwordHash = await hashPassword(password);
+    if (adminPasswordHash && passwordHash === adminPasswordHash) {
+      clearSavedLogin();
+      unlockAdmin();
+      return;
+    }
+    const branch = branchPasswordHashes[passwordHash];
+    if (branch) {
+      clearSavedLogin();
+      unlockBranch(branch);
+      return;
+    }
+    el.loginError.textContent = passwordHash
+      ? "Password cabang tidak sesuai."
+      : "Login server tidak tersedia dan kredensial halaman tidak dapat dibaca.";
     el.branchPassword.select();
-    return;
+  } catch (error) {
+    el.loginError.textContent = error.message || "Login gagal. Silakan coba lagi.";
+    el.branchPassword.select();
+  } finally {
+    if (submitButton) submitButton.disabled = false;
   }
-  unlockBranch(branch);
 }
 
-function applySavedLogin() {
-  if (sessionStorage.getItem("dashboardAccessMode") === "admin") {
+function applySavedBrowserLogin() {
+  if (adminPasswordHash && sessionStorage.getItem("dashboardAccessMode") === "admin") {
     unlockAdmin();
     return true;
   }
@@ -1053,6 +1447,28 @@ function applySavedLogin() {
     return true;
   }
   return false;
+}
+
+async function applySavedLogin() {
+  if (shouldUseDashboardApi()) {
+    const apiSession = await readDashboardSession();
+    if (apiSession.available) {
+      if (apiSession.session?.accessMode === "admin") {
+        unlockAdmin();
+        return true;
+      }
+      if (apiSession.session?.accessMode === "branch" && apiSession.session.branch) {
+        unlockBranch(apiSession.session.branch);
+        return true;
+      }
+      clearSavedLogin();
+      return false;
+    }
+
+    // Do not trust an unvalidated server token while the server is unreachable.
+    if (sessionStorage.getItem(dashboardSessionKey)) clearSavedLogin();
+  }
+  return applySavedBrowserLogin();
 }
 
 function renderPickers() {
@@ -2462,17 +2878,22 @@ function sheetCsvUrl(url, sheet, range) {
 }
 
 async function fetchText(url) {
-  const targets = canSyncOnline
-    ? [`/api/fetch?url=${encodeURIComponent(url)}`, url]
-    : [url];
+  const apiTarget = dashboardApiUrl(`/api/fetch?url=${encodeURIComponent(url)}`);
+  const targets = shouldUseDashboardApi()
+    ? [{ url: apiTarget, api: true }, { url, api: false }]
+    : [{ url, api: false }];
   for (const target of targets) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
     try {
-      const response = await fetch(target, { signal: controller.signal });
+      const response = await fetch(target.url, {
+        headers: target.api ? dashboardApiHeaders() : {},
+        signal: controller.signal
+      });
       if (response.ok) {
         return { ok: true, text: await response.text() };
       }
+      if (target.api && [401, 403].includes(response.status)) return { ok: false, text: "" };
     } catch {
       // Try the next source, then let the caller keep using local data.
     } finally {
@@ -2482,7 +2903,7 @@ async function fetchText(url) {
   return { ok: false, text: "" };
 }
 
-const canSyncOnline = ["http:", "https:"].includes(window.location.protocol);
+const canSyncOnline = ["http:", "https:"].includes(window.location.protocol) || shouldUseDashboardApi();
 
 function parseAgentValidation(csvText) {
   const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
@@ -2714,8 +3135,16 @@ el.periodTabs.forEach((tab) => {
   });
 });
 
-if (!applySavedLogin()) render();
-loadValidationAgentsOnly().finally(() => {
+(async function initializeDashboard() {
+  const isLoggedIn = await applySavedLogin();
+  if (!isLoggedIn) render();
+
+  if (!isLoggedIn && shouldUseDashboardApi()) {
+    el.syncStatus.textContent = "Masukkan password cabang untuk memuat data.";
+    return;
+  }
+
+  await loadValidationAgentsOnly();
   if (canSyncOnline && navigator.onLine) {
     loadSheet();
     startAutoSync();
@@ -2724,4 +3153,4 @@ loadValidationAgentsOnly().finally(() => {
       ? "Data lokal siap digunakan. Koneksi online tidak tersedia."
       : "Data lokal siap digunakan. Sinkronisasi online tersedia saat dashboard memakai server.";
   }
-});
+})();
