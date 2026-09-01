@@ -805,23 +805,45 @@ function monthName(value) {
   return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(parseDate(`${value}-01`));
 }
 
+function getWeekPeriodMonth(weekStart) {
+  const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6);
+  if (weekStart.getMonth() === weekEnd.getMonth()) {
+    return new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);
+  }
+
+  const startMonthDays = new Date(weekStart.getFullYear(), weekStart.getMonth() + 1, 0).getDate()
+    - weekStart.getDate() + 1;
+  const endMonthDays = weekEnd.getDate();
+  return startMonthDays > endMonthDays
+    ? new Date(weekStart.getFullYear(), weekStart.getMonth(), 1)
+    : new Date(weekEnd.getFullYear(), weekEnd.getMonth(), 1);
+}
+
 function getWeekKey(value) {
   const date = parseDate(value);
-  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNumber = target.getUTCDay() || 7;
-  target.setUTCDate(target.getUTCDate() + 4 - dayNumber);
-  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil((((target - yearStart) / 86400000) + 1) / 7);
-  return `${target.getUTCFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+  const mondayOffset = (date.getDay() + 6) % 7;
+  const weekStart = new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
+  const periodMonth = getWeekPeriodMonth(weekStart);
+  const monthStart = new Date(periodMonth.getFullYear(), periodMonth.getMonth(), 1);
+  const firstCandidate = new Date(
+    monthStart.getFullYear(),
+    monthStart.getMonth(),
+    monthStart.getDate() - ((monthStart.getDay() + 6) % 7)
+  );
+  const firstWeekStart = getWeekPeriodMonth(firstCandidate).getTime() === periodMonth.getTime()
+    ? firstCandidate
+    : new Date(firstCandidate.getFullYear(), firstCandidate.getMonth(), firstCandidate.getDate() + 7);
+  const weekNumber = Math.round((weekStart - firstWeekStart) / (7 * 86400000)) + 1;
+  return `${periodMonth.getFullYear()}-${String(periodMonth.getMonth() + 1).padStart(2, "0")}-W${String(weekNumber).padStart(2, "0")}`;
 }
 
 function getWeekLabel(weekKey) {
-  const weekRows = state.rows.filter((row) => getWeekKey(row.date) === weekKey);
-  const firstDate = weekRows.map((row) => parseDate(row.date)).sort((a, b) => a - b)[0];
-  if (!firstDate) return weekKey;
-  const weekInMonth = Math.ceil(firstDate.getDate() / 7);
-  const month = new Intl.DateTimeFormat("id-ID", { month: "long" }).format(firstDate);
-  return `W${weekInMonth} ${month}`;
+  const match = String(weekKey).match(/^(\d{4})-(\d{2})-W0?(\d+)$/);
+  if (!match) return weekKey;
+  const month = new Intl.DateTimeFormat("id-ID", { month: "long" }).format(
+    new Date(Number(match[1]), Number(match[2]) - 1, 1)
+  );
+  return `W${Number(match[3])} ${month}`;
 }
 
 function getMonthKey(value) {
