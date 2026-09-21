@@ -559,6 +559,7 @@ const state = {
     ...(window.embeddedTransitions || [])
   ],
   cbcSchools: window.embeddedCbcSchools || [],
+  planFuRows: window.embeddedPlanFuRows || [],
   agents: fallbackAgents,
   activePeriod: "daily",
   selectedRegional: "all",
@@ -876,6 +877,10 @@ function isVacantName(name) {
   return !name || name.toLowerCase().includes("vacant");
 }
 
+function agentKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function mergeAgentMaster(validationAgents = []) {
   const byName = new Map();
   [...fallbackAgents, ...validationAgents]
@@ -1015,19 +1020,48 @@ function renderHead(target) {
     <tr>
       <th>Nama Agen</th>
       <th>Posisi</th>
+      <th>Plan FU</th>
       ${statusColumns.map((status) => `<th>${status}</th>`).join("")}
       <th>Total FU</th>
+      <th>Progres</th>
     </tr>
   `;
 }
 
+function planRowsForCurrentPeriod() {
+  if (state.activePeriod === "daily") {
+    return state.planFuRows.filter((row) => row.date === state.selectedDate);
+  }
+  if (state.activePeriod === "weekly") {
+    return state.planFuRows.filter((row) => getWeekKey(row.date) === state.selectedWeek);
+  }
+  if (state.activePeriod === "monthly") {
+    return state.planFuRows.filter((row) => getMonthKey(row.date) === state.selectedMonth);
+  }
+  return [];
+}
+
+function planTotalsByAgent() {
+  const eligibleAgents = new Map(
+    getAgentMaster().map((agent) => [agentKey(agent.name), agent.name])
+  );
+  return planRowsForCurrentPeriod().reduce((totals, row) => {
+    const agentName = eligibleAgents.get(agentKey(row.agent));
+    if (!agentName) return totals;
+    totals.set(agentName, (totals.get(agentName) || 0) + Number(row.plan || 0));
+    return totals;
+  }, new Map());
+}
+
 function renderBody(target, rows) {
   const filteredRows = applyDashboardFilters(rows);
+  const planTotals = planTotalsByAgent();
   const master = getAgentMaster(filteredRows)
     .map((agent) => {
       const agentRows = filteredRows.filter((row) => row.agent === agent.name);
-    const total = fuStatusColumns.reduce((sum, status) => sum + sumRows(agentRows, status), 0);
-      return { ...agent, total };
+      const total = fuStatusColumns.reduce((sum, status) => sum + sumRows(agentRows, status), 0);
+      const plan = planTotals.get(agent.name) || 0;
+      return { ...agent, total, plan, progress: plan ? Math.round((total / plan) * 100) : null };
     })
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
 
@@ -1041,11 +1075,13 @@ function renderBody(target, rows) {
       <tr class="${agent.total ? "" : "no-data-row"}">
         <td>${agent.name}</td>
         <td>${agent.position}</td>
+        <td class="plan-cell ${agent.plan ? "" : "empty-cell"}">${agent.plan || "-"}</td>
         ${statusCells}
         <td class="total-cell ${agent.total ? "" : "empty-cell"}">${agent.total || "-"}</td>
+        <td class="progress-cell ${agent.progress === null ? "empty-cell" : ""}">${agent.progress === null ? "-" : `${agent.progress}%`}</td>
       </tr>
     `;
-  }).join("") || `<tr><td colspan="${statusColumns.length + 3}" class="empty-table">Tidak ada ejen pada filter ini.</td></tr>`;
+  }).join("") || `<tr><td colspan="${statusColumns.length + 5}" class="empty-table">Tidak ada ejen pada filter ini.</td></tr>`;
 }
 
 function renderBranchOptions() {
@@ -1494,9 +1530,16 @@ async function applySavedLogin() {
 }
 
 function renderPickers() {
-  const dates = uniqueSorted(state.rows.map((row) => row.date).filter(isIsoDate));
-  const weeks = uniqueSorted(state.rows.map((row) => getWeekKey(row.date)));
-  const months = uniqueSorted(state.rows.map((row) => getMonthKey(row.date)));
+  const planDates = state.planFuRows.map((row) => row.date).filter(isIsoDate);
+  const dates = uniqueSorted([...state.rows.map((row) => row.date), ...planDates].filter(isIsoDate));
+  const weeks = uniqueSorted([
+    ...state.rows.map((row) => getWeekKey(row.date)),
+    ...planDates.map((date) => getWeekKey(date))
+  ]);
+  const months = uniqueSorted([
+    ...state.rows.map((row) => getMonthKey(row.date)),
+    ...planDates.map((date) => getMonthKey(date))
+  ]);
   const today = isoDate(new Date());
 
   if (!dates.includes(state.selectedDate) || state.selectedDate > today) {
@@ -2950,6 +2993,36 @@ function parseAgentValidation(csvText) {
     });
 }
 
+function parsePlanFuRows(csvText) {
+  const parsed = csvToRows(csvText).filter((row) => row.some((cell) => cell.trim()));
+  const headers = parsed.shift()?.map(normalizeHeader) || [];
+  if (!headers.length) return [];
+
+  const dateKey = ["tanggal", "date", "tanggal_plan", "plan_date"]
+    .find((key) => headers.includes(key));
+  const agentKeyName = ["nama_agen", "nama_agent", "agent", "ejen"]
+    .find((key) => headers.includes(key));
+  const planKey = ["plan_fu", "plan", "jumlah_plan", "target_fu"]
+    .find((key) => headers.includes(key));
+  const branchKey = ["cabang", "branch", "branch_cluster_name"]
+    .find((key) => headers.includes(key));
+  if (!dateKey || !agentKeyName || !planKey) return [];
+
+  return parsed.map((row) => {
+    const record = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
+    return {
+      date: normalizeSheetDate(record[dateKey]),
+      agent: String(record[agentKeyName] || "").trim(),
+      branch: String(record[branchKey] || "").trim(),
+      plan: Number(String(record[planKey] || "").replace(/,/g, "."))
+    };
+  }).filter((row) => isIsoDate(row.date)
+    && row.agent
+    && !isVacantName(row.agent)
+    && Number.isFinite(row.plan)
+    && row.plan >= 0);
+}
+
 async function loadValidationAgentsOnly() {
   if (!canSyncOnline) {
     el.syncStatus.textContent = "Data lokal siap digunakan. Sinkronisasi online tersedia saat dashboard memakai server.";
@@ -2990,10 +3063,11 @@ async function loadSheet(options = {}) {
         .then((result) => ({ name: source.name, ...result }))
         .catch(() => ({ name: source.name, ok: false, text: "" })))
     ];
-    const [sourceResults, agentResponse, cbcResponse] = await Promise.all([
+    const [sourceResults, agentResponse, cbcResponse, planResponse] = await Promise.all([
       Promise.all(sourceRequests),
       fetchText(sheetCsvUrl(sheetUrl, "Validasi", "A:M")),
-      fetchText(sheetCsvUrl(sheetUrl, "CBC", "A:E"))
+      fetchText(sheetCsvUrl(sheetUrl, "CBC", "A:E")),
+      fetchText(sheetCsvUrl(sheetUrl, "plan fu", "A:I"))
     ]);
 
     const mainSource = sourceResults[0];
@@ -3013,6 +3087,10 @@ async function loadSheet(options = {}) {
       if (liveCbcSchools.length) {
         state.cbcSchools = liveCbcSchools;
       }
+    }
+
+    if (planResponse.ok) {
+      state.planFuRows = parsePlanFuRows(planResponse.text);
     }
 
     if (rows.length) {
@@ -3070,7 +3148,8 @@ async function loadSheet(options = {}) {
     const branchCount = Math.max(0, validSources.length - 1);
     const branchLabel = branchCount ? ` + ${branchCount} branch Sulsel` : "";
     const localCount = state.rows.filter((row) => sulselBranchSources.some((source) => source.name === row.branch)).length;
-    el.syncStatus.textContent = `${rows.length || localCount} data FU dimuat${branchLabel}. Auto sync 1 menit. Terakhir update ${syncedAt}.`;
+    const planLabel = state.planFuRows.length ? `, ${state.planFuRows.length} plan FU` : "";
+    el.syncStatus.textContent = `${rows.length || localCount} data FU dimuat${branchLabel}${planLabel}. Auto sync 1 menit. Terakhir update ${syncedAt}.`;
   } catch (error) {
     if (!silent) {
       const localCount = state.rows.filter((row) => sulselBranchSources.some((source) => source.name === row.branch)).length;

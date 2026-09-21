@@ -908,6 +908,32 @@ td:nth-child(n+4) {
   min-width: 66px;
 }
 
+th:nth-child(3),
+td:nth-child(3) {
+  width: 6.5%;
+  min-width: 62px;
+}
+
+th:nth-child(n + 4):nth-child(-n + 11),
+td:nth-child(n + 4):nth-child(-n + 11) {
+  width: 6.15%;
+  min-width: 60px;
+}
+
+th:nth-child(12),
+td:nth-child(12),
+th:nth-child(13),
+td:nth-child(13) {
+  width: 6.6%;
+  min-width: 64px;
+}
+
+.plan-cell,
+.progress-cell {
+  color: var(--rg-blue-dark);
+  font-weight: 700;
+}
+
 .total-cell {
   color: var(--rg-blue-dark);
   background: transparent;
