@@ -571,6 +571,7 @@ const state = {
   selectedWeek: "2026-W32",
   selectedMonth: "2026-08",
   selectedAgentDetail: "all",
+  selectedPeriodAgent: "",
   selectedLastStatus: "all",
   selectedCbcSchool: "",
   selectedCbcWeek: "",
@@ -1072,8 +1073,8 @@ function renderBody(target, rows) {
       return `<td class="${value ? "" : "empty-cell"}">${value || "-"}</td>`;
     }).join("");
     return `
-      <tr class="${agent.total ? "" : "no-data-row"}">
-        <td>${agent.name}</td>
+      <tr class="${agent.total ? "" : "no-data-row"} ${state.selectedPeriodAgent === agent.name ? "selected-agent-row" : ""}" data-agent-name="${escapeHtml(agent.name)}">
+        <td>${escapeHtml(agent.name)}</td>
         <td>${agent.position}</td>
         <td class="plan-cell ${agent.plan ? "" : "empty-cell"}">${agent.plan || "-"}</td>
         ${statusCells}
@@ -1082,6 +1083,120 @@ function renderBody(target, rows) {
       </tr>
     `;
   }).join("") || `<tr><td colspan="${statusColumns.length + 5}" class="empty-table">Tidak ada ejen pada filter ini.</td></tr>`;
+
+  renderPeriodAgentDetail(target.closest(".period-board")?.querySelector("[data-agent-detail-panel]"));
+}
+
+function periodRowsMatch(rowDate) {
+  if (state.activePeriod === "daily") return rowDate === state.selectedDate;
+  if (state.activePeriod === "weekly") return getWeekKey(rowDate) === state.selectedWeek;
+  if (state.activePeriod === "monthly") return getMonthKey(rowDate) === state.selectedMonth;
+  return false;
+}
+
+function selectedAgentPlanDetails(agentName) {
+  const grouped = new Map();
+  state.planFuRows
+    .filter((row) => agentKey(row.agent) === agentKey(agentName) && periodRowsMatch(row.date))
+    .filter((row) => !state.selectedBranch || state.selectedBranch === "all" || !row.branch || row.branch === state.selectedBranch)
+    .forEach((row) => {
+      const school = row.school || "Tanpa Sekolah";
+      const grade = row.grade || "Tanpa Grade";
+      const key = `${schoolKey(school)}|${schoolKey(grade)}`;
+      const current = grouped.get(key) || { school, grade, count: 0 };
+      current.count += Number(row.plan || 0);
+      grouped.set(key, current);
+    });
+  return [...grouped.values()].sort((a, b) => b.count - a.count || a.school.localeCompare(b.school));
+}
+
+function selectedAgentActualDetails(agentName) {
+  const grouped = new Map();
+  const addGroupedCount = (school, grade, count) => {
+    const normalizedSchool = school || "Tanpa Sekolah";
+    const normalizedGrade = grade || "Tanpa Grade";
+    const key = `${schoolKey(normalizedSchool)}|${schoolKey(normalizedGrade)}`;
+    const current = grouped.get(key) || { school: normalizedSchool, grade: normalizedGrade, count: 0 };
+    current.count += count;
+    grouped.set(key, current);
+  };
+  const detailedRows = applyDashboardFilters(state.rows)
+    .filter((row) => agentKey(row.agent) === agentKey(agentName))
+    .filter((row) => periodRowsMatch(row.date) && fuStatusColumns.includes(row.status))
+    .filter((row) => row.school || row.grade);
+  if (detailedRows.length) {
+    detailedRows.forEach((row) => addGroupedCount(row.school, row.grade, Number(row.count || 0)));
+  } else {
+    filteredMainLeadRecords()
+      .filter((lead) => agentKey(lead.agent) === agentKey(agentName))
+      .forEach((lead) => {
+      const school = lead.school || "Tanpa Sekolah";
+      const grade = lead.className || "Tanpa Grade";
+      const addCount = (date, count) => {
+        if (!date || !periodRowsMatch(date)) return;
+        addGroupedCount(school, grade, count);
+      };
+      if (Array.isArray(lead.statuses) && lead.statuses.length && typeof lead.statuses[0] === "object") {
+        lead.statuses.forEach((attempt) => addCount(attempt.date, 1));
+      } else if (lead.lastDate && Number(lead.frequency || 0)) {
+        addCount(lead.lastDate, Number(lead.frequency || 0));
+      }
+      });
+  }
+  return [...grouped.values()].sort((a, b) => b.count - a.count || a.school.localeCompare(b.school));
+}
+
+function renderAgentDetailRows(rows) {
+  return rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.school)}</td>
+      <td>${escapeHtml(row.grade)}</td>
+      <td>${row.count || "-"}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="3" class="empty-table">Belum ada data.</td></tr>`;
+}
+
+function renderPeriodAgentDetail(panel) {
+  if (!panel) return;
+  if (!state.selectedPeriodAgent || !["daily", "weekly", "monthly"].includes(state.activePeriod)) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  const planRows = selectedAgentPlanDetails(state.selectedPeriodAgent);
+  const actualRows = selectedAgentActualDetails(state.selectedPeriodAgent);
+  const periodLabel = state.activePeriod === "daily"
+    ? `Daily - ${formatShortDate(state.selectedDate)}`
+    : state.activePeriod === "weekly"
+      ? `Weekly - ${getWeekLabel(state.selectedWeek)}`
+      : `Monthly - ${monthName(state.selectedMonth)}`;
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="period-agent-detail-heading">
+      <div>
+        <span>Detail FU Agen</span>
+        <strong>${escapeHtml(state.selectedPeriodAgent)}</strong>
+        <small>${periodLabel}</small>
+      </div>
+      <button type="button" class="period-agent-detail-close" aria-label="Tutup detail agen">Tutup</button>
+    </div>
+    <div class="period-agent-detail-grid">
+      <article>
+        <h3>Plan FU</h3>
+        <table>
+          <thead><tr><th>Sekolah</th><th>Grade</th><th>Jumlah FU</th></tr></thead>
+          <tbody>${renderAgentDetailRows(planRows)}</tbody>
+        </table>
+      </article>
+      <article>
+        <h3>Actual Total FU</h3>
+        <table>
+          <thead><tr><th>Sekolah</th><th>Grade</th><th>Jumlah FU</th></tr></thead>
+          <tbody>${renderAgentDetailRows(actualRows)}</tbody>
+        </table>
+      </article>
+    </div>
+  `;
 }
 
 function renderBranchOptions() {
@@ -2844,6 +2959,8 @@ function parseSheetRows(csvText) {
     return parsed.flatMap((row) => {
       const branch = row[3] || "Tanpa Cabang";
       const agent = row[12] || "";
+      const school = row[5] || "";
+      const grade = row[10] || "";
       if (!agent || isVacantName(agent)) return [];
 
       return [0, 1, 2, 3, 4, 5].flatMap((index) => {
@@ -2854,7 +2971,7 @@ function parseSheetRows(csvText) {
         const items = [];
 
         if (isIsoDate(date) && status) {
-          items.push({ date, agent, branch, position: "", status, count: 1 });
+          items.push({ date, agent, branch, position: "", school, grade, status, count: 1 });
         }
 
         if (isIsoDate(date) && talk) {
@@ -2871,7 +2988,9 @@ function parseSheetRows(csvText) {
     const base = {
       date: record.tanggal || record.date || record.waktu || isoDate(new Date()),
       agent: record.ejen || record.agent || record.nama_ejen || record.nama || "Tanpa Nama",
-      position: record.posisi || record.position || "Student Advisor"
+      position: record.posisi || record.position || "Student Advisor",
+      school: firstCell(record, ["Nama Sekolah", "School Name", "School", "Sekolah"]),
+      grade: firstCell(record, ["Grade", "Kelas", "Class"])
     };
 
     if (record.status_fu || record.status) {
@@ -3004,6 +3123,10 @@ function parsePlanFuRows(csvText) {
     .find((key) => headers.includes(key));
   const planKey = ["plan_fu", "plan", "jumlah_plan", "target_fu"]
     .find((key) => headers.includes(key));
+  const schoolKeyName = ["nama_sekolah", "school", "school_name", "sekolah"]
+    .find((key) => headers.includes(key));
+  const gradeKey = ["grade", "kelas", "class", "class_name"]
+    .find((key) => headers.includes(key));
   const branchKey = ["cabang", "branch", "branch_cluster_name"]
     .find((key) => headers.includes(key));
   if (!dateKey || !agentKeyName || !planKey) return [];
@@ -3014,6 +3137,8 @@ function parsePlanFuRows(csvText) {
       date: normalizeSheetDate(record[dateKey]),
       agent: String(record[agentKeyName] || "").trim(),
       branch: String(record[branchKey] || "").trim(),
+      school: String(record[schoolKeyName] || "").trim(),
+      grade: String(record[gradeKey] || "").trim(),
       plan: Number(String(record[planKey] || "").replace(/,/g, "."))
     };
   }).filter((row) => isIsoDate(row.date)
@@ -3180,6 +3305,27 @@ el.weeklyPicker.addEventListener("change", (event) => {
 el.monthlyPicker.addEventListener("change", (event) => {
   state.selectedMonth = event.target.value;
   render();
+});
+
+function handlePeriodAgentClick(event) {
+  const row = event.target.closest("tr[data-agent-name]");
+  if (row) {
+    state.selectedPeriodAgent = state.selectedPeriodAgent === row.dataset.agentName
+      ? ""
+      : row.dataset.agentName;
+    render();
+    return;
+  }
+  if (event.target.closest(".period-agent-detail-close")) {
+    state.selectedPeriodAgent = "";
+    render();
+  }
+}
+
+el.periodBoards.forEach((board) => {
+  if (board.querySelector("[data-agent-detail-panel]")) {
+    board.addEventListener("click", handlePeriodAgentClick);
+  }
 });
 
 el.syncButton.addEventListener("click", () => loadSheet());
