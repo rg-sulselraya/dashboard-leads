@@ -1056,6 +1056,14 @@ td:nth-child(13) {
   text-align: left;
 }
 
+.status-detail-table-wrap thead th:first-child {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: #f8e3e8;
+}
+
 .status-detail-table-wrap tbody td {
   height: 34px;
   padding: 7px 10px;
