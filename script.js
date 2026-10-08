@@ -573,6 +573,7 @@ const state = {
   selectedAgentDetail: "all",
   selectedPeriodAgent: "",
   selectedLastStatus: "all",
+  selectedStatusDetail: null,
   selectedCbcSchool: "",
   selectedCbcWeek: "",
   lockedBranch: ""
@@ -1070,7 +1071,10 @@ function renderBody(target, rows) {
     const agentRows = filteredRows.filter((row) => row.agent === agent.name);
     const statusCells = statusColumns.map((status) => {
       const value = sumRows(agentRows, status);
-      return `<td class="${value ? "" : "empty-cell"}">${value || "-"}</td>`;
+      const canShowDetails = fuStatusColumns.includes(status) && value > 0;
+      return `<td class="${value ? "" : "empty-cell"}">${canShowDetails
+        ? `<button type="button" class="status-count" data-agent-name="${escapeHtml(agent.name)}" data-status="${escapeHtml(status)}" aria-label="Lihat detail ${escapeHtml(status)} untuk ${escapeHtml(agent.name)}">${value}</button>`
+        : (value || "-")}</td>`;
     }).join("");
     return `
       <tr class="${agent.total ? "" : "no-data-row"} ${state.selectedPeriodAgent === agent.name ? "selected-agent-row" : ""}" data-agent-name="${escapeHtml(agent.name)}">
@@ -1085,6 +1089,113 @@ function renderBody(target, rows) {
   }).join("") || `<tr><td colspan="${statusColumns.length + 5}" class="empty-table">Tidak ada ejen pada filter ini.</td></tr>`;
 
   renderPeriodAgentDetail(target.closest(".period-board")?.querySelector("[data-agent-detail-panel]"));
+}
+
+function statusDetailsForCell(agentName, status) {
+  const details = [];
+  const matchingLeads = filteredMainLeadRecords()
+    .filter((lead) => agentKey(lead.agent) === agentKey(agentName));
+
+  matchingLeads.forEach((lead) => {
+    const attempts = Array.isArray(lead.statuses)
+      ? lead.statuses.filter((attempt) => attempt && attempt.status === status && periodRowsMatch(attempt.date))
+      : [];
+
+    if (attempts.length) {
+      attempts.forEach(() => {
+        details.push({
+          student: lead.student,
+          school: lead.school,
+          grade: lead.className
+        });
+      });
+      return;
+    }
+
+    if ((!Array.isArray(lead.statuses) || !lead.statuses.length)
+      && lead.lastStatus === status
+      && periodRowsMatch(lead.lastDate)) {
+      details.push({
+        student: lead.student,
+        school: lead.school,
+        grade: lead.className
+      });
+    }
+  });
+
+  return details.sort((a, b) => (
+    String(a.student || "").localeCompare(String(b.student || ""))
+    || String(a.school || "").localeCompare(String(b.school || ""))
+  ));
+}
+
+function statusDetailPeriodLabel() {
+  if (state.activePeriod === "daily") return `Daily - ${formatShortDate(state.selectedDate)}`;
+  if (state.activePeriod === "weekly") return `Weekly - ${getWeekLabel(state.selectedWeek)}`;
+  if (state.activePeriod === "monthly") return `Monthly - ${monthName(state.selectedMonth)}`;
+  return "Periode aktif";
+}
+
+function closeStatusDetailPopover() {
+  const popover = document.querySelector("#statusDetailPopover");
+  if (popover) popover.remove();
+  state.selectedStatusDetail = null;
+}
+
+function positionStatusDetailPopover(popover, anchor) {
+  const margin = 10;
+  const anchorRect = anchor.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+  let left = anchorRect.left + (anchorRect.width / 2) - (popoverRect.width / 2);
+  let top = anchorRect.bottom + margin;
+  const maxLeft = window.innerWidth - popoverRect.width - margin;
+
+  left = Math.max(margin, Math.min(left, maxLeft));
+  if (top + popoverRect.height > window.innerHeight - margin) {
+    top = Math.max(margin, anchorRect.top - popoverRect.height - margin);
+  }
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
+
+function openStatusDetailPopover(button) {
+  closeStatusDetailPopover();
+  const agentName = button.dataset.agentName || "";
+  const status = button.dataset.status || "";
+  const details = statusDetailsForCell(agentName, status);
+  state.selectedStatusDetail = { agentName, status };
+
+  const popover = document.createElement("section");
+  popover.id = "statusDetailPopover";
+  popover.className = "status-detail-popover";
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", `Detail ${status} ${agentName}`);
+  popover.innerHTML = `
+    <div class="status-detail-popover-heading">
+      <div>
+        <strong>${escapeHtml(status)} - ${escapeHtml(agentName)}</strong>
+        <span>${escapeHtml(statusDetailPeriodLabel())} · ${details.length} FU</span>
+      </div>
+      <button type="button" class="status-detail-close" aria-label="Tutup detail status">×</button>
+    </div>
+    <div class="status-detail-table-wrap">
+      <table>
+        <thead>
+          <tr><th>Nama Siswa</th><th>Nama Sekolah</th><th>Grade</th></tr>
+        </thead>
+        <tbody>${details.map((detail) => `
+          <tr>
+            <td>${escapeHtml(detail.student || "-")}</td>
+            <td>${escapeHtml(detail.school || "-")}</td>
+            <td>${escapeHtml(detail.grade || "-")}</td>
+          </tr>
+        `).join("") || `<tr><td colspan="3" class="empty-table">Detail nama siswa belum tersedia.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+  document.body.appendChild(popover);
+  positionStatusDetailPopover(popover, button);
+  popover.querySelector(".status-detail-close")?.focus();
 }
 
 function periodRowsMatch(rowDate) {
@@ -2746,6 +2857,7 @@ function renderActivePeriod() {
 }
 
 function render() {
+  closeStatusDetailPopover();
   renderActivePeriod();
   renderRegionalOptions();
   renderBranchOptions();
@@ -3308,6 +3420,12 @@ el.monthlyPicker.addEventListener("change", (event) => {
 });
 
 function handlePeriodAgentClick(event) {
+  const statusButton = event.target.closest(".status-count");
+  if (statusButton) {
+    event.stopPropagation();
+    openStatusDetailPopover(statusButton);
+    return;
+  }
   const row = event.target.closest("tr[data-agent-name]");
   if (row) {
     state.selectedPeriodAgent = state.selectedPeriodAgent === row.dataset.agentName
@@ -3327,6 +3445,23 @@ el.periodBoards.forEach((board) => {
     board.addEventListener("click", handlePeriodAgentClick);
   }
 });
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".status-count")) return;
+  if (event.target.closest(".status-detail-close")) {
+    closeStatusDetailPopover();
+    return;
+  }
+  if (event.target.closest("#statusDetailPopover")) return;
+  closeStatusDetailPopover();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeStatusDetailPopover();
+});
+
+window.addEventListener("resize", closeStatusDetailPopover);
+window.addEventListener("scroll", closeStatusDetailPopover, true);
 
 el.syncButton.addEventListener("click", () => loadSheet());
 el.loginForm.addEventListener("submit", handleLogin);
