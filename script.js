@@ -3461,7 +3461,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("resize", closeStatusDetailPopover);
-window.addEventListener("scroll", closeStatusDetailPopover, true);
 
 el.syncButton.addEventListener("click", () => loadSheet());
 el.loginForm.addEventListener("submit", handleLogin);
