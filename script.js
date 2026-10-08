@@ -1911,7 +1911,7 @@ function renderTransitions() {
           ${item.label}
         </strong>
         <div class="mini-bar"><i style="width:${width}%"></i></div>
-        <b>${item.value}</b>
+        <button type="button" class="transition-count" data-transition-label="${escapeHtml(item.label)}" aria-label="Lihat agen untuk ${escapeHtml(item.label)}">${item.value}</button>
       </div>
     `;
   }).join("") || `<div class="empty-insight">Belum ada perubahan status pada periode ini.</div>`;
@@ -1923,6 +1923,55 @@ function renderTransitions() {
       <span class="transition-pill baru">Baru ${summary.baru}</span>
     </div>
   `);
+}
+
+function transitionAgentDetails(label) {
+  const totals = currentTransitions()
+    .filter((transition) => `${transition.from} -> ${transition.to}` === label)
+    .reduce((summary, transition) => {
+      const agent = transition.agent || "Tanpa Agen";
+      summary[agent] = (summary[agent] || 0) + 1;
+      return summary;
+    }, {});
+  return Object.entries(totals)
+    .map(([agent, total]) => ({ agent, total }))
+    .sort((a, b) => b.total - a.total || a.agent.localeCompare(b.agent));
+}
+
+function openTransitionAgentPopover(button) {
+  closeStatusDetailPopover();
+  const label = button.dataset.transitionLabel || "";
+  const details = transitionAgentDetails(label);
+  const popover = document.createElement("section");
+  popover.id = "statusDetailPopover";
+  popover.className = "status-detail-popover transition-detail-popover";
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", `Detail agen ${label}`);
+  popover.innerHTML = `
+    <div class="status-detail-popover-heading">
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(statusDetailPeriodLabel())} · ${details.reduce((sum, row) => sum + row.total, 0)} FU</span>
+      </div>
+      <button type="button" class="status-detail-close" aria-label="Tutup detail agen">×</button>
+    </div>
+    <div class="status-detail-table-wrap">
+      <table>
+        <thead>
+          <tr><th>Agen</th><th>Total FU</th></tr>
+        </thead>
+        <tbody>${details.map((detail) => `
+          <tr>
+            <td>${escapeHtml(detail.agent)}</td>
+            <td>${detail.total}</td>
+          </tr>
+        `).join("") || `<tr><td colspan="2" class="empty-table">Belum ada data agen.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+  document.body.appendChild(popover);
+  positionStatusDetailPopover(popover, button);
+  popover.querySelector(".status-detail-close")?.focus();
 }
 
 function transitionTone(from, to) {
@@ -3448,6 +3497,11 @@ el.periodBoards.forEach((board) => {
 
 document.addEventListener("click", (event) => {
   if (event.target.closest(".status-count")) return;
+  const transitionButton = event.target.closest(".transition-count");
+  if (transitionButton) {
+    openTransitionAgentPopover(transitionButton);
+    return;
+  }
   if (event.target.closest(".status-detail-close")) {
     closeStatusDetailPopover();
     return;

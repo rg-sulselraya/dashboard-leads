@@ -2000,6 +2000,29 @@ td:nth-child(13) {
   text-align: right;
 }
 
+.transition-count {
+  justify-self: end;
+  min-width: 42px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 7px;
+  color: #12315f;
+  background: transparent;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 720;
+  text-align: right;
+  cursor: pointer;
+}
+
+.transition-count:hover,
+.transition-count:focus-visible {
+  outline: 2px solid rgba(0, 119, 255, 0.22);
+  outline-offset: 1px;
+  color: var(--rg-blue);
+  background: #e2f3ff;
+}
+
 .transition-row .mini-bar i {
   background: #00a7b5;
 }
